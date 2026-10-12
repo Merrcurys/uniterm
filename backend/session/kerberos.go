@@ -40,6 +40,9 @@ func kerberosCachePath() (string, func(), error) {
 			path = strings.TrimPrefix(path, "FILE:")
 		case strings.HasPrefix(path, "DIR:"):
 			path = filepath.Join(strings.TrimPrefix(path, "DIR:"), "tkt")
+		case isWindowsDrivePath(path):
+			// A bare Windows path (C:\...\krb5cc) is a FILE cache; the
+			// drive letter's colon is not a cache-type prefix.
 		case strings.Contains(path, ":"):
 			if runtime.GOOS == "darwin" && strings.HasPrefix(path, "API:") {
 				return exportDarwinCredentialCache()
@@ -115,6 +118,18 @@ func exportDarwinCredentialCache() (string, func(), error) {
 func fileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
+}
+
+// isWindowsDrivePath reports whether path starts with a drive letter followed
+// by a colon (e.g. "C:\tmp\krb5cc"), so its colon is a drive separator rather
+// than a KRB5CCNAME cache-type prefix. Windows only — on other platforms a
+// leading single letter plus colon stays a (unsupported) cache-type prefix.
+func isWindowsDrivePath(path string) bool {
+	if runtime.GOOS != "windows" || len(path) < 2 {
+		return false
+	}
+	c := path[0]
+	return (c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z') && path[1] == ':'
 }
 
 func kerberosTarget(host, realm string) string {

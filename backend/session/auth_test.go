@@ -160,6 +160,10 @@ func TestParsePrivateKeyFileTildePath(t *testing.T) {
 func TestKerberosDoesNotFallBackToKeyboardInteractive(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "missing-krb5.conf")
 	t.Setenv("KRB5_CONFIG", configPath)
+	// Windows: an unset KRB5CCNAME routes to the SSPI/LSA client, which never
+	// consults krb5.conf. Pin an explicit FILE cache so the config check runs
+	// on every platform.
+	t.Setenv("KRB5CCNAME", "FILE:"+filepath.Join(t.TempDir(), "krb5cc"))
 	kb := func(string, string, []string, []bool) ([]string, error) {
 		t.Fatal("keyboard-interactive callback must not be used for Kerberos auth")
 		return nil, nil
