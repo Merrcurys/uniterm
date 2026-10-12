@@ -456,15 +456,10 @@ func (a *App) mcpCreateFileSession(sshSID string, config session.ConnectionConfi
 		proto = "scp"
 	}
 	// Same credential resolution as CreateSession/SessionStart
-	// (app_terminal.go): keychain fallback, identity and proxy
-	// materialization. The SSH session's stored config is already
-	// materialized, so these are no-ops except for channel clones, whose
-	// frontend-passed config skipped resolution.
-	if config.AuthType == "password" && config.Password == "" && config.ID != "" && a.connectionStore != nil {
-		if pw, err := a.connectionStore.EnsurePassword(config.ID); err == nil && pw != "" {
-			config.Password = pw
-		}
-	}
+	// (app_terminal.go): identity and proxy materialization. The SSH
+	// session's stored config is already materialized, so these are no-ops
+	// except for channel clones, whose frontend-passed config skipped
+	// resolution.
 	if config.AuthType == "identity" {
 		mc, err := a.materializeIdentity(config)
 		if err != nil {
@@ -655,11 +650,6 @@ func (a *App) mcpConnect(connectionID string) (string, error) {
 	}
 
 	// Same resolution chain as CreateSession (app_terminal.go).
-	if config.Password == "" && config.ID != "" {
-		if pw, err := a.connectionStore.EnsurePassword(config.ID); err == nil && pw != "" {
-			config.Password = pw
-		}
-	}
 	if config.AuthType == "identity" {
 		mc, err := a.materializeIdentity(config)
 		if err != nil {

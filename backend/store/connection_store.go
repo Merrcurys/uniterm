@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/ys-ll/uniterm/backend/credentials"
 	"github.com/ys-ll/uniterm/backend/session"
 )
 
@@ -24,9 +23,7 @@ type ConnectionStore struct {
 	passwordStore PasswordStore        // nil = encrypted fields pass through untouched (backward compat)
 	legacy        LegacyPasswordSource // optional fallback to pre-enc:v1 keychain entries
 	mu            sync.Mutex           // serializes Save + Load lazy re-encrypts (STORE-05/06).
-	pwdMu         sync.RWMutex         // guards pwdCache for F-110 async keychain fill.
-	pwdCache      map[string]string
-	lastSavedHash string // F-105: skip no-op rewrites keyed by canonical content hash.
+	lastSavedHash string               // F-105: skip no-op rewrites keyed by canonical content hash.
 }
 
 func NewConnectionStore(configDir string) (*ConnectionStore, error) {
@@ -75,21 +72,6 @@ func (s *ConnectionStore) Save(data session.ConnectionStoreData) error {
 			// so it is kept as-is.
 			conn.Password = ""
 		}
-		// The plaintext cache mirrors the saved password field for every
-		// auth type — key/keyText connections keep their private-key
-		// passphrase there (session/ssh_auth.go), so it is as much a
-		// credential as a password-login password. Cleared when the field is
-		// emptied so EnsurePassword can't resurrect a deleted password.
-		s.pwdMu.Lock()
-		if conn.Password == "" {
-			delete(s.pwdCache, conn.ID)
-		} else if !credentials.IsEncrypted(conn.Password) {
-			if s.pwdCache == nil {
-				s.pwdCache = map[string]string{}
-			}
-			s.pwdCache[conn.ID] = conn.Password
-		}
-		s.pwdMu.Unlock()
 	}
 
 	saveData := session.ConnectionStoreData{
@@ -144,9 +126,11 @@ func (s *ConnectionStore) Load() (session.ConnectionStoreData, error) {
 }
 
 // finishLoaded normalizes nil slices and applies the load-time policies the
-// manifest walk can't express: the legacy keychain backfill, the plaintext
-// cache used by EnsurePassword, and the lazy re-encrypt of legacy plaintext
-// (and orphaned enc:v1 residue left by older auth-type-conditional builds).
+// manifest walk can't express: the legacy keychain backfill with move
+// semantics (entries are deleted once the re-encrypted copy is on disk, so a
+// user-cleared password can't resurrect on the next load), and the lazy
+// re-encrypt of legacy plaintext (and orphaned enc:v1 residue left by older
+// auth-type-conditional builds).
 func (s *ConnectionStore) finishLoaded(data *session.ConnectionStoreData, res DecryptResult) session.ConnectionStoreData {
 	if data.Groups == nil {
 		data.Groups = []session.ConnectionGroup{}
@@ -156,24 +140,28 @@ func (s *ConnectionStore) finishLoaded(data *session.ConnectionStoreData, res De
 	}
 	needsSave := res.Plaintext > 0
 
+	// Connections backfilled from the legacy keychain are tracked so their
+	// entries are deleted once the re-encrypted copy is on disk — move
+	// semantics: a copy kept forever is what let a user-cleared password
+	// resurrect on the next load, since the backfill is keyed on an empty
+	// JSON field.
+	var backfilled []string
+
 	for i := range data.Connections {
 		conn := &data.Connections[i]
 		if conn.AuthType == "password" && conn.Password == "" && s.legacy != nil {
-			// Pre-enc:v1 scheme: the password lived in the keychain under
-			// conn/<id> and the JSON field was omitted; recover it here so
-			// the value stays visible without a manual re-entry. Password
-			// auth only — key/keyText passphrases never went through the
-			// legacy keychain, and backfilling them would break unencrypted
-			// keys. Falls back to "" when neither source has it.
+			// Pre-enc:v1: the password lived in the keychain under conn/<id>
+			// and the JSON field was omitted; recover it so the value stays
+			// visible without a manual re-entry. Password auth only —
+			// key/keyText passphrases never went through the legacy keychain,
+			// and backfilling them would break unencrypted keys. Falls back
+			// to "" when neither source has it.
 			if pw, err := s.legacy.GetPassword(conn.ID); err == nil && pw != "" {
 				conn.Password = pw
-				s.cachePwd(conn.ID, pw)
+				backfilled = append(backfilled, conn.ID)
 				needsSave = true // lazy-migrate into enc:v1 on next save
 			}
 			continue
-		}
-		if conn.Password != "" && !credentials.IsEncrypted(conn.Password) {
-			s.cachePwd(conn.ID, conn.Password)
 		}
 	}
 
@@ -191,6 +179,14 @@ func (s *ConnectionStore) finishLoaded(data *session.ConnectionStoreData, res De
 		s.mu.Lock()
 		s.lastSavedHash = h
 		s.mu.Unlock()
+		// The re-encrypted copy is on disk — delete the legacy entries (move
+		// semantics: a kept-forever copy is what let a user-cleared password
+		// resurrect on the next load, since the backfill keys on an empty
+		// JSON field). Best-effort: a failed delete leaves a stale entry that
+		// only resurfaces if that password is cleared later.
+		for _, id := range backfilled {
+			_ = s.legacy.DeletePassword(id)
+		}
 	} else {
 		// Seed the skip-state from the just-loaded content so an unchanged
 		// first Save after startup skips the rewrite.
@@ -201,40 +197,4 @@ func (s *ConnectionStore) finishLoaded(data *session.ConnectionStoreData, res De
 		}
 	}
 	return *data
-}
-
-// cachePwd stores a decrypted password in the EnsurePassword cache.
-func (s *ConnectionStore) cachePwd(id, pw string) {
-	s.pwdMu.Lock()
-	if s.pwdCache == nil {
-		s.pwdCache = map[string]string{}
-	}
-	s.pwdCache[id] = pw
-	s.pwdMu.Unlock()
-}
-
-// EnsurePassword returns the cached decrypted password for a connection ID.
-// Load() fills the cache synchronously from encrypted fields, so this is a
-// defensive fallback for callers that construct configs without going through
-// Load. On a cache miss it tries the legacy keychain (conn/<id>) so a connect
-// attempt can still recover a password that was never migrated into enc:v1.
-// Returns "" when there is no cached entry and no legacy keychain value.
-func (s *ConnectionStore) EnsurePassword(connID string) (string, error) {
-	s.pwdMu.RLock()
-	pw, ok := s.pwdCache[connID]
-	s.pwdMu.RUnlock()
-	if ok {
-		return pw, nil
-	}
-	if s.legacy == nil {
-		return "", nil
-	}
-	pw, err := s.legacy.GetPassword(connID)
-	if err != nil {
-		return "", nil
-	}
-	if pw != "" {
-		s.cachePwd(connID, pw)
-	}
-	return pw, nil
 }

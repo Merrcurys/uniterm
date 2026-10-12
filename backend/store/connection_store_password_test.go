@@ -118,34 +118,15 @@ func TestConnectionStore_LoadMigratesLegacyPlaintext(t *testing.T) {
 	}
 }
 
-func TestConnectionStore_EnsurePasswordCache(t *testing.T) {
-	dir := t.TempDir()
-	s := &ConnectionStore{configDir: dir, passwordStore: fakeCipherStore{}}
-	seed := session.ConnectionStoreData{
-		Groups:      []session.ConnectionGroup{},
-		Connections: []session.ConnectionConfig{{ID: "c1", Type: "ssh", AuthType: "password", Password: enc("pw")}},
-	}
-	_ = writeJSONFile(s.filePath(), seed)
-	if _, err := s.Load(); err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if got, _ := s.EnsurePassword("c1"); got != "pw" {
-		t.Fatalf("EnsurePassword = %q, want pw", got)
-	}
-	if got, _ := s.EnsurePassword("missing"); got != "" {
-		t.Fatalf("EnsurePassword(missing) = %q, want empty", got)
-	}
-}
-
-// TestConnectionStore_AuthModeSwitchDropsPasswordCache locks in that a cached
-// plaintext login password does not survive an auth-mode switch to key/keyText.
-// If it did, a later connect of the switched connection would backfill the
-// stale password as a key passphrase and break unencrypted private keys.
-func TestConnectionStore_AuthModeSwitchDropsPasswordCache(t *testing.T) {
+// TestConnectionStore_AuthModeSwitchDropsStalePassword locks in that a login
+// password does not survive an auth-mode switch to key/keyText. If it did, a
+// later connect of the switched connection would use the stale password as a
+// key passphrase and break unencrypted private keys.
+func TestConnectionStore_AuthModeSwitchDropsStalePassword(t *testing.T) {
 	dir := t.TempDir()
 	s := &ConnectionStore{configDir: dir, passwordStore: fakeCipherStore{}}
 
-	// Save as a password connection — this fills the plaintext cache.
+	// Save as a password connection.
 	saved := session.ConnectionStoreData{
 		Groups:      []session.ConnectionGroup{},
 		Connections: []session.ConnectionConfig{{ID: "c1", Type: "ssh", AuthType: "password", Password: "pw"}},
@@ -153,11 +134,8 @@ func TestConnectionStore_AuthModeSwitchDropsPasswordCache(t *testing.T) {
 	if err := s.Save(saved); err != nil {
 		t.Fatalf("Save password conn: %v", err)
 	}
-	if got, _ := s.EnsurePassword("c1"); got != "pw" {
-		t.Fatalf("EnsurePassword after password save = %q, want pw", got)
-	}
 
-	// Switch the same connection to keyText — the cache must be dropped.
+	// Switch the same connection to keyText — the password must be dropped.
 	switched := session.ConnectionStoreData{
 		Groups: []session.ConnectionGroup{},
 		Connections: []session.ConnectionConfig{{
@@ -168,8 +146,12 @@ func TestConnectionStore_AuthModeSwitchDropsPasswordCache(t *testing.T) {
 	if err := s.Save(switched); err != nil {
 		t.Fatalf("Save keyText conn: %v", err)
 	}
-	if got, _ := s.EnsurePassword("c1"); got != "" {
-		t.Fatalf("EnsurePassword after auth-mode switch = %q, want empty", got)
+	loaded, err := s.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.Connections[0].Password != "" {
+		t.Fatalf("stale password survived auth-mode switch: %q", loaded.Connections[0].Password)
 	}
 }
 
@@ -261,9 +243,6 @@ func TestConnectionStore_SaveEncryptsKeyPassphrase(t *testing.T) {
 	}
 	if loaded.Connections[1].Password != "inline-key-passphrase" {
 		t.Fatalf("keyText passphrase not restored: %q", loaded.Connections[1].Password)
-	}
-	if got, _ := s.EnsurePassword("c1"); got != "key-passphrase" {
-		t.Fatalf("EnsurePassword(c1) = %q, want key-passphrase", got)
 	}
 }
 
