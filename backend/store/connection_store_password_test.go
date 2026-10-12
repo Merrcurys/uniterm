@@ -2,6 +2,7 @@ package store
 
 import (
 	"encoding/base64"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -45,7 +46,7 @@ func TestConnectionStore_LoadDecryptsPassword(t *testing.T) {
 		Groups:      []session.ConnectionGroup{},
 		Connections: []session.ConnectionConfig{{ID: "c1", Type: "ssh", AuthType: "password", Password: enc("secret")}},
 	}
-	if err := s.writeJSONLocked(seed); err != nil {
+	if err := writeJSONFile(s.filePath(), seed); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	data, err := s.Load()
@@ -98,7 +99,7 @@ func TestConnectionStore_LoadMigratesLegacyPlaintext(t *testing.T) {
 		Groups:      []session.ConnectionGroup{},
 		Connections: []session.ConnectionConfig{{ID: "c1", Type: "ssh", AuthType: "password", Password: "legacy"}},
 	}
-	if err := s.writeJSONLocked(seed); err != nil {
+	if err := writeJSONFile(s.filePath(), seed); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	data, err := s.Load()
@@ -124,7 +125,7 @@ func TestConnectionStore_EnsurePasswordCache(t *testing.T) {
 		Groups:      []session.ConnectionGroup{},
 		Connections: []session.ConnectionConfig{{ID: "c1", Type: "ssh", AuthType: "password", Password: enc("pw")}},
 	}
-	_ = s.writeJSONLocked(seed)
+	_ = writeJSONFile(s.filePath(), seed)
 	if _, err := s.Load(); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -208,7 +209,7 @@ func TestConnectionStore_LoadDecryptsKeyText(t *testing.T) {
 		Groups:      []session.ConnectionGroup{},
 		Connections: []session.ConnectionConfig{{ID: "c1", Type: "ssh", AuthType: "keyText", KeyContent: enc("PEM-KEY"), Password: enc("pp")}},
 	}
-	if err := s.writeJSONLocked(seed); err != nil {
+	if err := writeJSONFile(s.filePath(), seed); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	data, err := s.Load()
@@ -217,5 +218,120 @@ func TestConnectionStore_LoadDecryptsKeyText(t *testing.T) {
 	}
 	if data.Connections[0].KeyContent != "PEM-KEY" {
 		t.Fatalf("Load KeyContent = %q, want PEM-KEY", data.Connections[0].KeyContent)
+	}
+}
+
+// TestConnectionStore_SaveEncryptsKeyPassphrase locks in the field-based
+// encryption rule: a key-type connection's private-key passphrase (stored in
+// Password) is encrypted at rest exactly like a password-login credential —
+// encryption is driven by the secret-field manifest, not by auth type.
+func TestConnectionStore_SaveEncryptsKeyPassphrase(t *testing.T) {
+	dir := t.TempDir()
+	s := &ConnectionStore{configDir: dir, passwordStore: fakeCipherStore{}}
+
+	data := session.ConnectionStoreData{
+		Groups: []session.ConnectionGroup{},
+		Connections: []session.ConnectionConfig{
+			{ID: "c1", Type: "ssh", AuthType: "key", KeyPath: "/tmp/id_ed25519", Password: "key-passphrase"},
+			{ID: "c2", Type: "ssh", AuthType: "keyText", KeyContent: "-----BEGIN OPENSSH PRIVATE KEY-----", Password: "inline-key-passphrase"},
+		},
+	}
+	if err := s.Save(data); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, storeFileName))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if contains(string(raw), "key-passphrase") ||
+		contains(string(raw), "inline-key-passphrase") ||
+		contains(string(raw), "-----BEGIN OPENSSH PRIVATE KEY-----") {
+		t.Fatalf("plaintext secret leaked to disk: %s", raw)
+	}
+
+	loaded, err := s.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.Connections[0].Password != "key-passphrase" {
+		t.Fatalf("key passphrase not restored: %q", loaded.Connections[0].Password)
+	}
+	if loaded.Connections[1].KeyContent != "-----BEGIN OPENSSH PRIVATE KEY-----" {
+		t.Fatalf("keyContent not restored: %q", loaded.Connections[1].KeyContent)
+	}
+	if loaded.Connections[1].Password != "inline-key-passphrase" {
+		t.Fatalf("keyText passphrase not restored: %q", loaded.Connections[1].Password)
+	}
+	if got, _ := s.EnsurePassword("c1"); got != "key-passphrase" {
+		t.Fatalf("EnsurePassword(c1) = %q, want key-passphrase", got)
+	}
+}
+
+// refusingCipher accepts any Encrypt but refuses every Decrypt, standing in
+// for a wrong or unavailable master key.
+type refusingCipher struct{}
+
+func (refusingCipher) Encrypt(p string) (string, error) { return fakeCipherStore{}.Encrypt(p) }
+func (refusingCipher) Decrypt(string) (string, error) {
+	return "", errors.New("wrong key")
+}
+
+// TestConnectionStore_LoadDecryptErrorSurfaces verifies a wrong-key decrypt
+// failure propagates from Load instead of silently leaving ciphertext in
+// memory (prerequisite for surfacing a re-unlock prompt on migrated data).
+func TestConnectionStore_LoadDecryptErrorSurfaces(t *testing.T) {
+	dir := t.TempDir()
+	s := &ConnectionStore{configDir: dir, passwordStore: fakeCipherStore{}}
+	if err := s.Save(session.ConnectionStoreData{
+		Groups:      []session.ConnectionGroup{},
+		Connections: []session.ConnectionConfig{{ID: "c1", Type: "ssh", AuthType: "key", Password: "secret"}},
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	s.passwordStore = refusingCipher{}
+	if _, err := s.Load(); err == nil {
+		t.Fatal("expected Load to surface the decrypt error")
+	}
+}
+
+// TestConnectionStore_SaveSkipsUnchangedContent locks in the F-105 skip:
+// the comparison happens on the PRE-encryption input, so saving identical
+// data must not touch the file at all (AES-GCM's random nonce would make a
+// post-encryption comparison useless).
+func TestConnectionStore_SaveSkipsUnchangedContent(t *testing.T) {
+	dir := t.TempDir()
+	s := &ConnectionStore{configDir: dir, passwordStore: fakeCipherStore{}}
+	data := session.ConnectionStoreData{
+		Groups:      []session.ConnectionGroup{},
+		Connections: []session.ConnectionConfig{{ID: "c1", Type: "ssh", AuthType: "password", Password: "secret"}},
+	}
+	if err := s.Save(data); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	path := filepath.Join(dir, storeFileName)
+	// Overwrite the on-disk copy with a sentinel: if the next Save rewrites
+	// the file, the sentinel disappears and the test fails.
+	if err := os.WriteFile(path, []byte("sentinel"), 0600); err != nil {
+		t.Fatalf("seed sentinel: %v", err)
+	}
+	if err := s.Save(data); err != nil {
+		t.Fatalf("second Save: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if string(raw) != "sentinel" {
+		t.Fatal("Save rewrote unchanged content — plaintext-level skip is broken")
+	}
+	// Changed content must go through.
+	changed := data
+	changed.Connections = []session.ConnectionConfig{{ID: "c1", Type: "ssh", AuthType: "password", Password: "other"}}
+	if err := s.Save(changed); err != nil {
+		t.Fatalf("Save changed: %v", err)
+	}
+	raw, _ = os.ReadFile(path)
+	if string(raw) == "sentinel" {
+		t.Fatal("Save skipped content that actually changed")
 	}
 }

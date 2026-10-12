@@ -20,7 +20,7 @@ func TestMigrateLegacyKeychainToInPlace(t *testing.T) {
 	dir := t.TempDir()
 	// Seed connections.json with an empty password (legacy: password in keychain).
 	cs := &ConnectionStore{configDir: dir}
-	_ = cs.writeJSONLocked(session.ConnectionStoreData{
+	_ = writeJSONFile(cs.filePath(), session.ConnectionStoreData{
 		Groups:      []session.ConnectionGroup{},
 		Connections: []session.ConnectionConfig{{ID: "c1", Type: "ssh", AuthType: "password", Password: ""}},
 	})

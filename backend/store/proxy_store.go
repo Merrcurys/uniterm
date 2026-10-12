@@ -1,13 +1,10 @@
 package store
 
 import (
-	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"sync"
 
-	"github.com/ys-ll/uniterm/backend/credentials"
 	"github.com/ys-ll/uniterm/backend/session"
 )
 
@@ -17,6 +14,7 @@ type ProxyStore struct {
 	configDir     string
 	passwordStore PasswordStore // nil = refuse to write plaintext passwords
 	mu            sync.Mutex    // serializes Save + Load password rewrites
+	lastSavedHash string        // F-105 skip state (pre-encryption content hash)
 }
 
 func NewProxyStore(configDir string) (*ProxyStore, error) {
@@ -44,56 +42,27 @@ func (s *ProxyStore) Save(data session.ProxyStoreData) error {
 	proxies := make([]session.Proxy, len(data.Proxies))
 	copy(proxies, data.Proxies)
 
-	for i := range proxies {
-		p := &proxies[i]
-		if p.Pass == "" || credentials.IsEncrypted(p.Pass) {
-			continue
-		}
-		if s.passwordStore == nil {
-			return errors.New("passwordStore not initialized; refusing to save plaintext password")
-		}
-		enc, err := s.passwordStore.Encrypt(p.Pass)
-		if err != nil {
-			return err
-		}
-		p.Pass = enc
-	}
-
-	jsonData, err := json.MarshalIndent(session.ProxyStoreData{Proxies: proxies}, "", "  ")
-	if err != nil {
-		return err
-	}
-	return atomicWriteFile(s.filePath(), jsonData, 0600)
+	out := session.ProxyStoreData{Proxies: proxies}
+	// Shared Save envelope (filestore.go): hash-skip, encrypt, atomic write.
+	h, err := saveEncryptedFile(proxyStoreFileName, s.filePath(), &out, s.passwordStore, s.lastSavedHash)
+	s.lastSavedHash = h
+	return err
 }
 
-// Load reads proxies.json, returning an empty store when the file does not
-// exist, quarantining+erroring on corrupt JSON, and decrypting the Pass field
-// of each proxy.
+// Load reads proxies.json: empty store when the file does not exist,
+// quarantine+error on corrupt JSON, decrypting the manifest secret fields
+// (filestore.go envelope).
 func (s *ProxyStore) Load() (session.ProxyStoreData, error) {
-	data, err := os.ReadFile(s.filePath())
-	if err != nil {
-		if os.IsNotExist(err) {
-			return session.ProxyStoreData{Proxies: []session.Proxy{}}, nil
-		}
-		return session.ProxyStoreData{}, err
+	out, _, hash, existed, err := loadEncryptedFile[session.ProxyStoreData](proxyStoreFileName, s.filePath(), s.passwordStore)
+	if !existed {
+		return session.ProxyStoreData{Proxies: []session.Proxy{}}, nil
 	}
-	var out session.ProxyStoreData
-	if err := json.Unmarshal(data, &out); err != nil {
-		quarantineCorrupt(s.filePath())
+	if err != nil {
 		return session.ProxyStoreData{}, err
 	}
 	if out.Proxies == nil {
 		out.Proxies = []session.Proxy{}
 	}
-	for i := range out.Proxies {
-		p := &out.Proxies[i]
-		if p.Pass != "" && credentials.IsEncrypted(p.Pass) && s.passwordStore != nil {
-			pw, err := s.passwordStore.Decrypt(p.Pass)
-			if err != nil {
-				return session.ProxyStoreData{}, err
-			}
-			p.Pass = pw
-		}
-	}
+	s.lastSavedHash = hash
 	return out, nil
 }

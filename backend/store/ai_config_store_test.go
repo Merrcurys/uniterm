@@ -15,14 +15,16 @@ func TestAIConfigStore_MigrateFromSettings(t *testing.T) {
 		t.Fatalf("NewAIConfigStore: %v", err)
 	}
 
-	// Seed settings.json with a user model (plaintext key: no password store
-	// wired, matching the pre-unlock state).
+	// Seed settings.json with a user model. The cipher is wired (as it always
+	// is in production startup) so the plaintext key lands encrypted on disk.
+	ss.SetPasswordStore(fakeCipherStore{})
 	settings := defaultSettings()
 	settings.AI.Models[0].APIKey = "sk-user-key"
 	if err := ss.Save(settings); err != nil {
 		t.Fatalf("seed settings: %v", err)
 	}
 
+	acs.SetPasswordStore(fakeCipherStore{})
 	if err := acs.MigrateFromSettingsIfNeeded(settings); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}

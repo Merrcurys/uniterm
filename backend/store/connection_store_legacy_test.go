@@ -14,8 +14,8 @@ import (
 // pre-enc:v1 keychain (conn/<id>) holding plaintext passwords.
 type fakeLegacyKC struct{ pw map[string]string }
 
-func (f fakeLegacyKC) GetPassword(id string) (string, error)  { return f.pw[id], nil }
-func (fakeLegacyKC) GetModelAPIKey(string) (string, error)    { return "", nil }
+func (f fakeLegacyKC) GetPassword(id string) (string, error) { return f.pw[id], nil }
+func (fakeLegacyKC) GetModelAPIKey(string) (string, error)   { return "", nil }
 
 // TestLoadFallsBackToLegacyKeychain reproduces the upgrade regression: a
 // connection saved under the old scheme has no enc:v1 field (the password
@@ -110,7 +110,7 @@ func TestLoadEncV1PreferredOverLegacy(t *testing.T) {
 func mustWriteConnections(t *testing.T, dir string, data session.ConnectionStoreData) {
 	t.Helper()
 	s := &ConnectionStore{configDir: dir}
-	if err := s.writeJSONLocked(data); err != nil {
-		t.Fatalf("writeJSONLocked: %v", err)
+	if err := writeJSONFile(s.filePath(), data); err != nil {
+		t.Fatalf("writeJSONFile: %v", err)
 	}
 }

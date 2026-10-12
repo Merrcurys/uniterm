@@ -48,8 +48,7 @@ func MigrateLegacyKeychainToInPlace(configDir string, legacy LegacyPasswordSourc
 			}
 		}
 		if changed {
-			out, _ := json.MarshalIndent(d, "", "  ")
-			if err := atomicWriteFile(connPath, out, 0600); err != nil {
+			if err := writeJSONFile(connPath, d); err != nil {
 				return count, err
 			}
 		}
@@ -79,8 +78,7 @@ func MigrateLegacyKeychainToInPlace(configDir string, legacy LegacyPasswordSourc
 			}
 		}
 		if changed {
-			out, _ := json.Marshal(s)
-			if err := atomicWriteFile(setPath, out, 0600); err != nil {
+			if err := writeJSONFile(setPath, s); err != nil {
 				return count, err
 			}
 		}

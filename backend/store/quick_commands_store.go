@@ -1,8 +1,6 @@
 package store
 
 import (
-	"encoding/json"
-	"os"
 	"path/filepath"
 )
 
@@ -30,7 +28,8 @@ type QuickCommandData struct {
 }
 
 type QuickCommandsStore struct {
-	configDir string
+	configDir     string
+	lastSavedHash string // F-105 skip state (pre-encryption content hash)
 }
 
 func NewQuickCommandsStore(configDir string) *QuickCommandsStore {
@@ -41,28 +40,24 @@ func (s *QuickCommandsStore) filePath() string {
 	return filepath.Join(s.configDir, quickCommandsFileName)
 }
 
+// Shared Save envelope (filestore.go): hash-skip, encrypt, atomic write.
 func (s *QuickCommandsStore) Save(data QuickCommandData) error {
-	bytes, err := json.MarshalIndent(data, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(s.filePath(), bytes, 0600)
+	h, err := saveEncryptedFile(quickCommandsFileName, s.filePath(), &data, nil, s.lastSavedHash)
+	s.lastSavedHash = h
+	return err
 }
 
 func (s *QuickCommandsStore) Load() (QuickCommandData, error) {
-	bytes, err := os.ReadFile(s.filePath())
+	out, _, hash, existed, err := loadEncryptedFile[QuickCommandData](quickCommandsFileName, s.filePath(), nil)
+	if !existed {
+		return QuickCommandData{Version: 1, Groups: []QuickCommandGroup{}, Commands: []QuickCommand{}}, nil
+	}
 	if err != nil {
-		if os.IsNotExist(err) {
-			return QuickCommandData{Version: 1, Groups: []QuickCommandGroup{}, Commands: []QuickCommand{}}, nil
-		}
 		return QuickCommandData{}, err
 	}
-	var data QuickCommandData
-	if err := json.Unmarshal(bytes, &data); err != nil {
-		return QuickCommandData{}, err
+	if out.Version == 0 {
+		out.Version = 1
 	}
-	if data.Version == 0 {
-		data.Version = 1
-	}
-	return data, nil
+	s.lastSavedHash = hash
+	return out, nil
 }

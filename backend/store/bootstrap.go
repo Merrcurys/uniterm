@@ -167,14 +167,10 @@ func WriteBootstrap(kind, customDir string) error {
 	if kind == "custom" {
 		b.DataDir = customDir
 	}
-	data, err := json.Marshal(b)
-	if err != nil {
-		return err
-	}
 	if err := os.MkdirAll(filepath.Dir(primary), 0755); err != nil {
 		return err
 	}
-	if err := atomicWriteFile(primary, data, 0600); err != nil {
+	if err := writeJSONFile(primary, b); err != nil {
 		return err
 	}
 	// A mode switch must not leave a second, shadowing pointer behind.

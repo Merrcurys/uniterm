@@ -1,13 +1,10 @@
 package store
 
 import (
-	"bytes"
-	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
-
-	"github.com/ys-ll/uniterm/backend/credentials"
 )
 
 const aiConfigFileName = "ai.json"
@@ -26,6 +23,7 @@ type AIConfigStore struct {
 	configDir     string
 	passwordStore PasswordStore
 	mu            sync.Mutex
+	lastSavedHash string // F-105 skip state (pre-encryption content hash)
 }
 
 func NewAIConfigStore(configDir string) (*AIConfigStore, error) {
@@ -59,77 +57,36 @@ func (s *AIConfigStore) Save(cfg AIStoreData) error {
 
 	models := make([]AIModelConfig, len(cfg.Models))
 	copy(models, cfg.Models)
-	for i := range models {
-		m := &models[i]
-		if m.APIKey == "" || credentials.IsEncrypted(m.APIKey) {
-			continue
-		}
-		if s.passwordStore == nil {
-			continue
-		}
-		enc, err := s.passwordStore.Encrypt(m.APIKey)
-		if err != nil {
-			return err
-		}
-		m.APIKey = enc
-	}
 	cfg.Models = models
-	if cfg.Models == nil {
-		cfg.Models = []AIModelConfig{}
-	}
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(cfg); err != nil {
-		return err
-	}
-	return atomicWriteFile(s.filePath(), buf.Bytes(), 0600)
+	// Shared Save envelope (filestore.go): hash-skip, encrypt, atomic write.
+	h, err := saveEncryptedFile(aiConfigFileName, s.filePath(), &cfg, s.passwordStore, s.lastSavedHash)
+	s.lastSavedHash = h
+	return err
 }
 
 // Load reads ai.json. A missing file yields the default config; a corrupt
 // file is quarantined before falling back, matching SettingsStore's
 // STORE-09 behaviour.
 func (s *AIConfigStore) Load() (AIStoreData, error) {
-	data, err := os.ReadFile(s.filePath())
+	cfg, res, hash, existed, err := loadEncryptedFile[AIStoreData](aiConfigFileName, s.filePath(), s.passwordStore)
+	if !existed {
+		return defaultAIConfig(), nil
+	}
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, errUnparseableConfig) {
 			return defaultAIConfig(), nil
 		}
 		return AIStoreData{}, err
 	}
-	var cfg AIStoreData
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		s.mu.Lock()
-		quarantineCorrupt(s.filePath())
-		s.mu.Unlock()
-		return defaultAIConfig(), nil
-	}
-
-	s.mu.Lock()
-	ps := s.passwordStore
-	s.mu.Unlock()
-
-	needsSave := false
-	for i := range cfg.Models {
-		m := &cfg.Models[i]
-		if m.APIKey == "" || ps == nil {
-			continue
-		}
-		if credentials.IsEncrypted(m.APIKey) {
-			ak, err := ps.Decrypt(m.APIKey)
-			if err != nil {
-				return AIStoreData{}, err
-			}
-			m.APIKey = ak
-		} else {
-			needsSave = true
-		}
-	}
+	needsSave := res.Plaintext > 0
 	if cfg.MaxTurns == nil {
 		cfg.MaxTurns = intPtr(defaultMaxTurns)
 		needsSave = true
 	}
 	if needsSave {
 		_ = s.Save(cfg)
+	} else {
+		s.lastSavedHash = hash
 	}
 	return cfg, nil
 }
