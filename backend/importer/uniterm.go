@@ -1,12 +1,14 @@
 package importer
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/ys-ll/uniterm/backend/credentials"
 	"github.com/ys-ll/uniterm/backend/session"
+	"github.com/ys-ll/uniterm/backend/store"
 )
 
 const unitermFormat = "uniterm"
@@ -25,35 +27,93 @@ type utmFile struct {
 	session.ConnectionStoreData
 }
 
-// ExportUniterm serializes the full store to .utm JSON. When password is empty,
-// all password fields are cleared and encrypted=false. Otherwise passwords are
-// encrypted with a fresh PBKDF2-derived key and encrypted=true.
+// ExportUniterm serializes the connection store to .utm JSON. data must
+// already be plaintext — the store decrypts in-place ciphertext on Load, and
+// a value still carrying the enc:v1: prefix would make the export depend on
+// the source machine's credential store, so it aborts the export instead of
+// riding along. Every manifest-declared secret field (the same list saving
+// uses — password and key content) is encrypted with the export password via
+// a fresh PBKDF2-derived key; the export password is required.
 func ExportUniterm(data session.ConnectionStoreData, password string) ([]byte, error) {
-	f := utmFile{Format: unitermFormat, Version: 1, ConnectionStoreData: data}
 	if password == "" {
-		for i := range f.Connections {
-			f.Connections[i].Password = ""
-		}
-		return json.MarshalIndent(f, "", "  ")
+		return nil, errors.New("export password required")
 	}
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return nil, err
+	}
+	if bytes.Contains(raw, []byte(credentials.Prefix)) {
+		return nil, errors.New("connection data still carries in-place encrypted fields")
+	}
+
 	salt, err := newSalt()
 	if err != nil {
 		return nil, err
 	}
-	f.Encrypted = true
-	f.KDF = &utmKDF{Algo: kdfAlgo, Iterations: kdfIterations, Salt: encodeSalt(salt)}
-	for i := range f.Connections {
-		c := &f.Connections[i]
-		if c.Password == "" || strings.HasPrefix(c.Password, credentials.Prefix) {
-			continue
-		}
-		enc, err := encryptField(c.Password, password, salt)
-		if err != nil {
-			return nil, err
-		}
-		c.Password = enc
+	f := utmFile{
+		Format:              unitermFormat,
+		Version:             1,
+		Encrypted:           true,
+		KDF:                 &utmKDF{Algo: kdfAlgo, Iterations: kdfIterations, Salt: encodeSalt(salt)},
+		ConnectionStoreData: data,
+	}
+	ps := exportCipher{pass: password, salt: salt}
+	if err := store.EncryptSecretFields(connectionsManifestFile, &f.ConnectionStoreData, ps); err != nil {
+		return nil, err
 	}
 	return json.MarshalIndent(f, "", "  ")
+}
+
+// connectionsManifestFile keys the store's secret-field manifest for the
+// connection store; the export protects exactly the fields saving protects.
+const connectionsManifestFile = "connections.json"
+
+// exportCipher adapts the .utm export crypto (PBKDF2-derived key, salt fixed
+// per file) to the store's PasswordStore, so the manifest walk encrypts the
+// export's secret fields with the export password.
+type exportCipher struct {
+	pass string
+	salt []byte
+}
+
+func (c exportCipher) Encrypt(plaintext string) (string, error) {
+	return encryptField(plaintext, c.pass, c.salt)
+}
+
+func (c exportCipher) Decrypt(encoded string) (string, error) {
+	return decryptField(encoded, c.pass, c.salt)
+}
+
+func (c exportCipher) Unlocked() bool { return true }
+
+// MaterializeForExport resolves every identity-referencing connection into a
+// plain credential connection, so an export is self-contained: no authType
+// "identity" survives and nothing references the source machine's identity
+// store. A dangling reference — the identity was deleted after the connection
+// referenced it — degrades to a connection without credentials, keeping the
+// username already on the connection (it never came from the identity).
+func MaterializeForExport(data session.ConnectionStoreData, resolve session.IdentityResolver) (session.ConnectionStoreData, error) {
+	for i := range data.Connections {
+		c := &data.Connections[i]
+		if c.AuthType != "identity" {
+			continue
+		}
+		id, ok := resolve(c.IdentityId)
+		if !ok {
+			c.AuthType = "password"
+			c.IdentityId = ""
+			continue
+		}
+		mc, err := session.MaterializeIdentity(*c, func(string) (session.Identity, bool) { return id, true })
+		if err != nil {
+			return session.ConnectionStoreData{}, fmt.Errorf("connection %s: %w", c.ID, err)
+		}
+		// Runtime materialization keeps the reference; the export must not —
+		// the credential now travels inside the connection itself.
+		mc.IdentityId = ""
+		*c = mc
+	}
+	return data, nil
 }
 
 // parseUniterm decodes a .utm file into an ImportResult with freshly generated ids.
@@ -76,16 +136,12 @@ func parseUniterm(data []byte, opts ParseOptions) (*ImportResult, error) {
 		if err != nil {
 			return nil, fmt.Errorf("decode salt: %w", err)
 		}
-		for i := range f.Connections {
-			c := &f.Connections[i]
-			if c.Password == "" {
-				continue
-			}
-			plain, err := decryptField(c.Password, opts.Password, salt)
-			if err != nil {
-				return nil, fmt.Errorf("wrong import password")
-			}
-			c.Password = plain
+		// The manifest walk decrypts every secret field the export
+		// encrypted (password and key content); a failure means the import
+		// password is wrong.
+		ps := exportCipher{pass: opts.Password, salt: salt}
+		if _, err := store.DecryptSecretFields(connectionsManifestFile, &f.ConnectionStoreData, ps); err != nil {
+			return nil, fmt.Errorf("wrong import password")
 		}
 	}
 

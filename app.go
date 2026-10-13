@@ -841,13 +841,24 @@ func (a *App) SaveProxies(data session.ProxyStoreData) error {
 	return a.proxyStore.Save(data)
 }
 
-// ExportConnections writes the full store to destPath as a .utm file. When
-// password is non-empty, password fields are encrypted; otherwise cleared.
+// ExportConnections writes the full store to destPath as a .utm file. Every
+// identity-referencing connection is materialized first — the identity store
+// itself is not exported, so the credentials travel inside the connections
+// and the file never depends on this machine's identity store — and all
+// manifest-declared secret fields are encrypted with password.
 func (a *App) ExportConnections(destPath, password string) error {
 	if a.connectionStore == nil {
 		return fmt.Errorf("connection store not initialized")
 	}
 	data, err := a.connectionStore.Load()
+	if err != nil {
+		return err
+	}
+	resolve, err := a.identityResolver()
+	if err != nil {
+		return err
+	}
+	data, err = importer.MaterializeForExport(data, resolve)
 	if err != nil {
 		return err
 	}

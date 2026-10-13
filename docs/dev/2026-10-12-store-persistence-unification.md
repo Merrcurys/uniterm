@@ -20,7 +20,11 @@
 
 - **原因**：个别连接身上残留着旧密文（比如连接从密码登录改成密钥登录后留下的）。导出时遇到这种残留原样跳过写进文件；导入时程序又拿你的导出密码去解这段残留密文，当然解不开，整个文件导入失败。
 - **修法**：导出时把残留密文先用当前钥匙解成明文再正常加密进文件；解不开就直接报错拒绝导出，绝不生成一个必然导入失败的文件。
-- **状态**：未实施（`ExportUniterm` 的 enc:v1 兜底）。
+- **状态**：已实施，范围比原修法大（本轮讨论追加了三点）：
+  1. **导出/导入的字段集合与保存一致**：`ExportUniterm`/`parseUniterm` 不再自己判断秘密字段，改为把导出密码包成 `store.PasswordStore` 适配器走 `SecretFiles` manifest walk（`connections.json` 的 `password` + `keyContent`）。修掉了"带密码导出的 .utm 里私钥 PEM 是明文"的漏洞。
+  2. **导出只收明文**：store 的 `Load()` 已解密全部 `enc:v1:`（本轮 manifest 化解密顺带清掉旧版按 authType 条件加密留下的孤儿密文），导出器再兜底——输入里出现 `enc:v1:` 直接报错（原来是静默放行，正是"生成必然导入失败文件"的来源）。后端无密码导出分支已删除（UI 本就强制密码），`ExportUniterm` 现在要求导出密码。
+  3. **身份库物化**：`.utm` 只导出连接，但连接可以 `authType: "identity"` 引用 identities.json 的可复用凭据——原样导出就是悬空引用，换机连不上。`ExportConnections` 现在先用 `MaterializeForExport`（复用运行时的 `MaterializeIdentity`）把每个身份引用物化成普通 password/key/keyText 连接（用户名/密码/私钥内嵌），导出文件里不再有任何 identity 引用；悬空引用降级为"无凭据连接"（保留连接自带的用户名覆盖，密码留空）。
+  - 维持现状：`keyPath` 型外部私钥文件仍是路径引用，换机依赖本机文件（内嵌涉及把私钥写进导出文件的安全权衡，单独做）。identities 本身仍不导出。
 
 ### 问题 4：改配置目录时，数据被清空
 
