@@ -1,6 +1,8 @@
 package store
 
 import (
+	"encoding/json"
+	"fmt"
 	"path/filepath"
 
 	"github.com/ys-ll/uniterm/backend/session"
@@ -43,4 +45,25 @@ func (s *TunnelStore) Load() (session.TunnelStoreData, error) {
 	}
 	s.lastSavedHash = hash
 	return out, nil
+}
+
+// BlobName, ExportPlain and ImportPlain implement the sync exchange contract
+// (SyncableStore, declared in backend/sync/backend.go).
+
+func (s *TunnelStore) BlobName() string { return tunnelsFileName }
+
+func (s *TunnelStore) ExportPlain() ([]byte, error) {
+	return exportPlainStore(tunnelsFileName, s.filePath(), s.Load)
+}
+
+// ImportPlain backfills Version before saving, mirroring Load.
+func (s *TunnelStore) ImportPlain(raw []byte) error {
+	var data session.TunnelStoreData
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return fmt.Errorf("parse sync blob: %w", err)
+	}
+	if data.Version == 0 {
+		data.Version = 1
+	}
+	return s.Save(data)
 }

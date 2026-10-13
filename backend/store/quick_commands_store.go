@@ -1,6 +1,8 @@
 package store
 
 import (
+	"encoding/json"
+	"fmt"
 	"path/filepath"
 )
 
@@ -60,4 +62,26 @@ func (s *QuickCommandsStore) Load() (QuickCommandData, error) {
 	}
 	s.lastSavedHash = hash
 	return out, nil
+}
+
+// BlobName, ExportPlain and ImportPlain implement the sync exchange contract
+// (SyncableStore, declared in backend/sync/backend.go).
+
+func (s *QuickCommandsStore) BlobName() string { return quickCommandsFileName }
+
+func (s *QuickCommandsStore) ExportPlain() ([]byte, error) {
+	return exportPlainStore(quickCommandsFileName, s.filePath(), s.Load)
+}
+
+// ImportPlain backfills Version before saving so the on-disk copy always
+// carries the explicit value, mirroring Load's normalization.
+func (s *QuickCommandsStore) ImportPlain(raw []byte) error {
+	var data QuickCommandData
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return fmt.Errorf("parse sync blob: %w", err)
+	}
+	if data.Version == 0 {
+		data.Version = 1
+	}
+	return s.Save(data)
 }

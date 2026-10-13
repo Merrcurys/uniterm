@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -492,4 +493,55 @@ func quarantineCorrupt(path string) string {
 		return ""
 	}
 	return target
+}
+
+// The sync exchange contract (SyncableStore, declared in
+// backend/sync/backend.go) is implemented by each store in its own file.
+// The interface lives on the consumer side: store → credentials → sync means
+// sync → store would be an import cycle, so the stores satisfy sync's
+// interface structurally and neither package imports the other — the
+// registry is assembled in app.go.
+//
+// The contract:
+//
+//   - ExportPlain renders the store's canonical plaintext — the same shape
+//     the on-disk JSON carries after decryption (Load applies the store's
+//     full semantics: legacy backfill with move semantics, lazy re-encrypt,
+//     defaults). Secret fields come out as plaintext; the sync layer
+//     re-encrypts the whole blob with the sync key downstream. A cleared
+//     secret exports as cleared — the store is the single source of truth.
+//   - A store whose backing file was never written returns an error wrapping
+//     fs.ErrNotExist. Sync skips such blobs instead of uploading an empty
+//     document that would clobber the remote copy.
+//   - ImportPlain parses the blob and persists it through Save, so every
+//     save-time invariant (password clearing for identity-auth, manifest
+//     encryption, hash-skip) applies unchanged.
+
+// exportPlainStore is the shared ExportPlain body: a store whose backing file
+// was never created reports fs.ErrNotExist (sync skips it); otherwise the
+// data comes through the store's own Load (all semantics applied) and is
+// marshalled in the canonical on-disk form.
+func exportPlainStore[T any](blob, path string, load func() (T, error)) ([]byte, error) {
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("%s: %w", blob, fs.ErrNotExist)
+		}
+		return nil, err
+	}
+	data, err := load()
+	if err != nil {
+		return nil, err
+	}
+	return json.MarshalIndent(data, "", "  ")
+}
+
+// importPlainStore is the shared ImportPlain body: parse into the store's
+// data type and persist through Save. Unparseable input surfaces as an error
+// so a corrupt blob never persists a zero value over good local data.
+func importPlainStore[T any](raw []byte, save func(T) error) error {
+	var data T
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return fmt.Errorf("parse sync blob: %w", err)
+	}
+	return save(data)
 }

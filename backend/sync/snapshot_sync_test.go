@@ -98,6 +98,11 @@ func newSnapshotTestService(t *testing.T, scope []string) (*SyncService, string,
 	// clobber the user's sync-config.json and sync-repo during test runs
 	// (syncSnapshot uses s.repoPath as its fetch staging dir).
 	s := newScopeTestService(t, t.TempDir(), dataDir)
+	stores := make([]SyncableStore, 0, len(syncableFiles))
+	for _, name := range syncableFiles {
+		stores = append(stores, &snapshotBlobStore{name: name, dir: dataDir})
+	}
+	s.SetStores(stores)
 	key := []byte("0123456789abcdef0123456789abcdef")
 	if err := s.keychain.StoreEncryptionKey(key); err != nil {
 		t.Fatal(err)
@@ -148,10 +153,10 @@ func TestSnapshotSilentPull(t *testing.T) {
 	staging := b.staging(t)
 	srcDir := t.TempDir()
 	writeConfig(t, srcDir, "connections.json", `{"v":2}`)
-	if err := EncryptConfigFilesScoped([]string{"connections.json"}, srcDir, staging, key, nil, nil); err != nil {
+	if err := EncryptConfigFilesScoped([]string{"connections.json"}, srcDir, staging, key); err != nil {
 		t.Fatal(err)
 	}
-	hashes, _, err := hashConfigFiles([]string{"connections.json"}, srcDir, nil, nil)
+	hashes, _, err := canonicalDirHashes([]string{"connections.json"}, srcDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,10 +192,10 @@ func TestSnapshotConflictWhenBothChanged(t *testing.T) {
 	other := t.TempDir()
 	staging := b.staging(t)
 	writeConfig(t, other, "connections.json", `{"remote":true}`)
-	if err := EncryptConfigFilesScoped([]string{"connections.json"}, other, staging, key, nil, nil); err != nil {
+	if err := EncryptConfigFilesScoped([]string{"connections.json"}, other, staging, key); err != nil {
 		t.Fatal(err)
 	}
-	hashes, _, err := hashConfigFiles([]string{"connections.json"}, other, nil, nil)
+	hashes, _, err := canonicalDirHashes([]string{"connections.json"}, other)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,10 +253,10 @@ func TestSnapshotPullKeepsOutOfManifestLocalFile(t *testing.T) {
 	staging := b.staging(t)
 	srcDir := t.TempDir()
 	writeConfig(t, srcDir, "connections.json", `{"v":1}`)
-	if err := EncryptConfigFilesScoped([]string{"connections.json"}, srcDir, staging, key, nil, nil); err != nil {
+	if err := EncryptConfigFilesScoped([]string{"connections.json"}, srcDir, staging, key); err != nil {
 		t.Fatal(err)
 	}
-	hashes, _, err := hashConfigFiles([]string{"connections.json"}, srcDir, nil, nil)
+	hashes, _, err := canonicalDirHashes([]string{"connections.json"}, srcDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,10 +339,10 @@ func TestSnapshotPasswordMismatch(t *testing.T) {
 	staging := b.staging(t)
 	srcDir := t.TempDir()
 	writeConfig(t, srcDir, "connections.json", `{"v":9}`)
-	if err := EncryptConfigFilesScoped([]string{"connections.json"}, srcDir, staging, otherKey, nil, nil); err != nil {
+	if err := EncryptConfigFilesScoped([]string{"connections.json"}, srcDir, staging, otherKey); err != nil {
 		t.Fatal(err)
 	}
-	hashes, _, err := hashConfigFiles([]string{"connections.json"}, srcDir, nil, nil)
+	hashes, _, err := canonicalDirHashes([]string{"connections.json"}, srcDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,10 +371,10 @@ func TestSnapshotFirstJoinConflict(t *testing.T) {
 	staging := b.staging(t)
 	srcDir := t.TempDir()
 	writeConfig(t, srcDir, "connections.json", `{"remote":true}`)
-	if err := EncryptConfigFilesScoped([]string{"connections.json"}, srcDir, staging, key, nil, nil); err != nil {
+	if err := EncryptConfigFilesScoped([]string{"connections.json"}, srcDir, staging, key); err != nil {
 		t.Fatal(err)
 	}
-	hashes, _, err := hashConfigFiles([]string{"connections.json"}, srcDir, nil, nil)
+	hashes, _, err := canonicalDirHashes([]string{"connections.json"}, srcDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -403,10 +408,10 @@ func TestSnapshotResolveConflictUseLocal(t *testing.T) {
 	other := t.TempDir()
 	writeConfig(t, other, "connections.json", `{"remote":1}`)
 	staging := b.staging(t) // shared staging dir for encrypt + StoreAll
-	if err := EncryptConfigFilesScoped([]string{"connections.json"}, other, staging, key, nil, nil); err != nil {
+	if err := EncryptConfigFilesScoped([]string{"connections.json"}, other, staging, key); err != nil {
 		t.Fatal(err)
 	}
-	hashes, _, _ := hashConfigFiles([]string{"connections.json"}, other, nil, nil)
+	hashes, _, _ := canonicalDirHashes([]string{"connections.json"}, other)
 	_ = b.StoreAll(staging, []byte("0123456789abcdef"), SnapshotInfo{Version: "v2", UpdatedAt: time.Now().UTC(), FileHashes: hashes})
 	writeConfig(t, dataDir, "connections.json", `{"local":1}`)
 
@@ -436,7 +441,7 @@ func TestSnapshotResolveConflictUseLocal(t *testing.T) {
 	// conflict toward the remote.
 	writeConfig(t, dataDir, "connections.json", `{"local":2}`)
 	staging2 := b.staging(t)
-	if err := EncryptConfigFilesScoped([]string{"connections.json"}, other, staging2, key, nil, nil); err != nil {
+	if err := EncryptConfigFilesScoped([]string{"connections.json"}, other, staging2, key); err != nil {
 		t.Fatal(err)
 	}
 	if err := b.StoreAll(staging2, []byte("0123456789abcdef"), SnapshotInfo{Version: "v3", UpdatedAt: time.Now().UTC(), FileHashes: hashes}); err != nil {
@@ -494,10 +499,10 @@ func publishWebDAVSnapshot(t *testing.T, f *fakeDAV, masterPassword string) *Web
 	staging := t.TempDir()
 	srcDir := t.TempDir()
 	writeConfig(t, srcDir, "connections.json", `{"remote":1}`)
-	if err := EncryptConfigFilesScoped([]string{"connections.json"}, srcDir, staging, key, nil, nil); err != nil {
+	if err := EncryptConfigFilesScoped([]string{"connections.json"}, srcDir, staging, key); err != nil {
 		t.Fatal(err)
 	}
-	hashes, _, err := hashConfigFiles([]string{"connections.json"}, srcDir, nil, nil)
+	hashes, _, err := canonicalDirHashes([]string{"connections.json"}, srcDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -641,4 +646,27 @@ func TestIsAutoSyncEnabledCoversWebDAV(t *testing.T) {
 			}
 		})
 	}
+}
+
+// snapshotBlobStore is a minimal SyncableStore fake backed by a plain file
+// in dir. ExportPlain reads the backing blob — the raw os error already
+// wraps fs.ErrNotExist when the file was never written, so sync skips the
+// store instead of uploading an empty document that would clobber the
+// remote copy — and ImportPlain persists through a plain write, mirroring
+// the contract app.go's assembly satisfies structurally: sync holds only
+// interface values and never imports store (sync → store → credentials →
+// sync would cycle), so the test fake lives on the consumer side too.
+type snapshotBlobStore struct {
+	name string
+	dir  string
+}
+
+func (f *snapshotBlobStore) BlobName() string { return f.name }
+
+func (f *snapshotBlobStore) ExportPlain() ([]byte, error) {
+	return os.ReadFile(filepath.Join(f.dir, f.name))
+}
+
+func (f *snapshotBlobStore) ImportPlain(plain []byte) error {
+	return os.WriteFile(filepath.Join(f.dir, f.name), plain, 0600)
 }

@@ -354,6 +354,11 @@ func (a *App) initStores(dataDir string, upgrade bool) {
 		// Normalize enc:v1: fields at the sync boundary using the credential
 		// store (set by initCredentials above).
 		syncSvc.SetPasswordStore(a.credentialStore)
+		// Config-exchange registry: the sync layer holds only SyncableStore
+		// interface values (sync → store would cycle through credentials),
+		// so the concrete stores are assembled here — the only place that
+		// imports both packages.
+		syncSvc.SetStores(a.syncableStores())
 		// Auto-sync on startup if enabled
 		if syncSvc.IsAutoSyncEnabled() {
 			go func() {
@@ -1302,8 +1307,44 @@ func (a *App) ClearBackgroundImage() error {
 	return nil
 }
 
-// reloadStoresAfterSync reloads connections and settings from disk and emits
-// events so the frontend refreshes after a sync pull.
+// syncableStores assembles the config-exchange registry handed to the sync
+// service. It lives in app.go because this is the only package that imports
+// both backend/sync and backend/store — the concrete stores satisfy
+// sync.SyncableStore structurally, so neither package needs to import the
+// other (sync → store would cycle through credentials). A store that failed
+// to init is skipped: sync then never exchanges that blob, instead of
+// panicking on a nil receiver.
+func (a *App) syncableStores() []sync.SyncableStore {
+	stores := make([]sync.SyncableStore, 0, 8)
+	if a.connectionStore != nil {
+		stores = append(stores, a.connectionStore)
+	}
+	if a.identityStore != nil {
+		stores = append(stores, a.identityStore)
+	}
+	if a.proxyStore != nil {
+		stores = append(stores, a.proxyStore)
+	}
+	if a.aiConfigStore != nil {
+		stores = append(stores, a.aiConfigStore)
+	}
+	if a.favoriteStore != nil {
+		stores = append(stores, a.favoriteStore)
+	}
+	if a.quickCommandsStore != nil {
+		stores = append(stores, a.quickCommandsStore)
+	}
+	if a.tunnelStore != nil {
+		stores = append(stores, a.tunnelStore)
+	}
+	if a.settingsStore != nil {
+		stores = append(stores, a.settingsStore)
+	}
+	return stores
+}
+
+// reloadStoresAfterSync reloads every store a sync pull may have rewritten
+// and emits events so the frontend refreshes without a restart.
 func (a *App) reloadStoresAfterSync() {
 	if a.connectionStore != nil {
 		if data, err := a.connectionStore.Load(); err == nil {
@@ -1333,6 +1374,16 @@ func (a *App) reloadStoresAfterSync() {
 	if a.proxyStore != nil {
 		if data, err := a.proxyStore.Load(); err == nil {
 			a.emit("store:proxies:changed", data)
+		}
+	}
+	if a.favoriteStore != nil {
+		if data, err := a.favoriteStore.Load(); err == nil {
+			a.emit("store:favorites:changed", data)
+		}
+	}
+	if a.tunnelStore != nil {
+		if data, err := a.tunnelStore.Load(); err == nil {
+			a.emit("store:tunnels:changed", data)
 		}
 	}
 }

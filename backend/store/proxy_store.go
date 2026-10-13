@@ -66,3 +66,16 @@ func (s *ProxyStore) Load() (session.ProxyStoreData, error) {
 	s.lastSavedHash = hash
 	return out, nil
 }
+
+// BlobName, ExportPlain and ImportPlain implement the sync exchange contract
+// (SyncableStore, declared in backend/sync/backend.go).
+
+func (s *ProxyStore) BlobName() string { return proxyStoreFileName }
+
+func (s *ProxyStore) ExportPlain() ([]byte, error) {
+	return exportPlainStore(proxyStoreFileName, s.filePath(), s.Load)
+}
+
+func (s *ProxyStore) ImportPlain(raw []byte) error {
+	return importPlainStore(raw, s.Save)
+}

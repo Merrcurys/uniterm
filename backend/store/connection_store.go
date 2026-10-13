@@ -198,3 +198,16 @@ func (s *ConnectionStore) finishLoaded(data *session.ConnectionStoreData, res De
 	}
 	return *data
 }
+
+// BlobName, ExportPlain and ImportPlain implement the sync exchange contract
+// (SyncableStore, declared in backend/sync/backend.go).
+
+func (s *ConnectionStore) BlobName() string { return storeFileName }
+
+func (s *ConnectionStore) ExportPlain() ([]byte, error) {
+	return exportPlainStore(storeFileName, s.filePath(), s.Load)
+}
+
+func (s *ConnectionStore) ImportPlain(raw []byte) error {
+	return importPlainStore(raw, s.Save)
+}

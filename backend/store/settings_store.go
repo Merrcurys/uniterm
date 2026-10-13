@@ -400,3 +400,16 @@ func defaultKeyboard() map[string]KeyBinding {
 		"openSettings":     {Ctrl: true, Shift: false, Alt: false, Key: ","},
 	}
 }
+
+// BlobName, ExportPlain and ImportPlain implement the sync exchange contract
+// (SyncableStore, declared in backend/sync/backend.go).
+
+func (s *SettingsStore) BlobName() string { return settingsFileName }
+
+func (s *SettingsStore) ExportPlain() ([]byte, error) {
+	return exportPlainStore(settingsFileName, s.filePath(), s.Load)
+}
+
+func (s *SettingsStore) ImportPlain(raw []byte) error {
+	return importPlainStore(raw, s.Save)
+}

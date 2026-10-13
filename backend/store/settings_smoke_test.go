@@ -222,3 +222,48 @@ func TestSettingsStore_ConcurrentSaveLoad(t *testing.T) {
 		<-done
 	}
 }
+
+func mustSettingsStore(t *testing.T) *SettingsStore {
+	t.Helper()
+	s, err := NewSettingsStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewSettingsStore: %v", err)
+	}
+	s.SetPasswordStore(fakeCipherStore{})
+	return s
+}
+
+// TestSettingsStoreSyncRoundTrip pins the sync exchange contract for the
+// opt-in settings.json: the blob must carry plaintext apiKeys and survive a
+// round-trip through a store on another directory.
+func TestSettingsStoreSyncRoundTrip(t *testing.T) {
+	a := mustSettingsStore(t)
+	seed := defaultSettings()
+	seed.Theme = "light"
+	seed.Language = "zh-CN"
+	seed.AI.Models = []AIModelConfig{{ID: "m1", Name: "model", APIKey: "sk-set"}}
+	if err := a.Save(seed); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	plain, err := a.ExportPlain()
+	if err != nil {
+		t.Fatalf("ExportPlain: %v", err)
+	}
+	if !contains(string(plain), "sk-set") || contains(string(plain), "enc:v1:") {
+		t.Fatalf("blob must carry plaintext secrets: %s", plain)
+	}
+	b := mustSettingsStore(t)
+	if err := b.ImportPlain(plain); err != nil {
+		t.Fatalf("ImportPlain: %v", err)
+	}
+	got, err := b.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.Theme != "light" || got.Language != "zh-CN" {
+		t.Fatalf("settings lost: %+v", got)
+	}
+	if len(got.AI.Models) != 1 || got.AI.Models[0].APIKey != "sk-set" {
+		t.Fatalf("settings ai models lost: %+v", got.AI.Models)
+	}
+}

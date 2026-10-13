@@ -3,6 +3,7 @@ package store
 import (
 	"encoding/base64"
 	"errors"
+	"io/fs"
 	"strings"
 	"testing"
 )
@@ -196,5 +197,62 @@ func TestUnknownFileIsNoOp(t *testing.T) {
 	}
 	if ObjHasEncryptedSecrets("unknown.json", obj) {
 		t.Fatal("expected false for unknown file")
+	}
+}
+
+// syncable mirrors sync.SyncableStore structurally. The interface lives in
+// backend/sync (consumer side) because store → credentials → sync makes
+// sync → store an import cycle; this local mirror plus the slice literals
+// below are the compile-time assertion that every syncable store keeps
+// satisfying it.
+type syncable interface {
+	BlobName() string
+	ExportPlain() ([]byte, error)
+	ImportPlain([]byte) error
+}
+
+// allSyncableStores is every store that participates in config exchange.
+func allSyncableStores(t *testing.T) []syncable {
+	t.Helper()
+	return []syncable{
+		mustConnStore(t), mustIdentityStore(t), mustProxyStore(t), mustAIStore(t),
+		NewFavoriteStore(t.TempDir()), NewQuickCommandsStore(t.TempDir()),
+		NewTunnelStore(t.TempDir()), mustSettingsStore(t),
+	}
+}
+
+// TestSyncableExportPlainSkipsNeverPersistedStore locks in the sync-blob
+// contract: a store whose backing file was never written exports nothing —
+// the sync layer must skip it rather than upload an empty blob that would
+// clobber the remote copy (favorites.json wipe class of bugs).
+func TestSyncableExportPlainSkipsNeverPersistedStore(t *testing.T) {
+	for _, s := range allSyncableStores(t) {
+		_, err := s.ExportPlain()
+		if !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("%s: ExportPlain on never-persisted store = %v, want fs.ErrNotExist", s.BlobName(), err)
+		}
+	}
+}
+
+// TestSyncableBlobNames pins the remote blob names — the registry keys and
+// the git/WebDAV remote file names must not drift.
+func TestSyncableBlobNames(t *testing.T) {
+	want := map[string]string{
+		"connections.json":   "connections.json",
+		"identities.json":    "identities.json",
+		"proxies.json":       "proxies.json",
+		"ai.json":            "ai.json",
+		"favorites.json":     "favorites.json",
+		"quickCommands.json": "quickCommands.json",
+		"tunnels.json":       "tunnels.json",
+		"settings.json":      "settings.json",
+	}
+	for _, s := range allSyncableStores(t) {
+		if s.BlobName() != want[s.BlobName()] {
+			t.Errorf("BlobName %q not in the synced set", s.BlobName())
+		}
+		if !strings.HasSuffix(s.BlobName(), ".json") {
+			t.Errorf("BlobName %q must be a .json blob", s.BlobName())
+		}
 	}
 }

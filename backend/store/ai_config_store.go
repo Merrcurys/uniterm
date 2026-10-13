@@ -109,3 +109,16 @@ func (s *AIConfigStore) MigrateFromSettingsIfNeeded(settings AppSettings) error 
 	}
 	return s.Save(AIStoreData{MaxTurns: maxTurns, Models: settings.AI.Models})
 }
+
+// BlobName, ExportPlain and ImportPlain implement the sync exchange contract
+// (SyncableStore, declared in backend/sync/backend.go).
+
+func (s *AIConfigStore) BlobName() string { return aiConfigFileName }
+
+func (s *AIConfigStore) ExportPlain() ([]byte, error) {
+	return exportPlainStore(aiConfigFileName, s.filePath(), s.Load)
+}
+
+func (s *AIConfigStore) ImportPlain(raw []byte) error {
+	return importPlainStore(raw, s.Save)
+}

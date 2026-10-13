@@ -81,3 +81,16 @@ func (s *FavoriteStore) GetAll() []string {
 	copy(result, s.ids)
 	return result
 }
+
+// BlobName, ExportPlain and ImportPlain implement the sync exchange contract
+// (SyncableStore, declared in backend/sync/backend.go).
+
+func (s *FavoriteStore) BlobName() string { return favoriteFileName }
+
+func (s *FavoriteStore) ExportPlain() ([]byte, error) {
+	return exportPlainStore(favoriteFileName, s.filePath, s.Load)
+}
+
+func (s *FavoriteStore) ImportPlain(raw []byte) error {
+	return importPlainStore(raw, s.Save)
+}

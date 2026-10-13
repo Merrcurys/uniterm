@@ -7,14 +7,14 @@ import (
 
 func TestEffectiveSyncFilesNilScopeKeepsLegacy(t *testing.T) {
 	got := EffectiveSyncFiles(nil)
-	if !reflect.DeepEqual(got, syncedFiles) {
-		t.Fatalf("nil scope = %v, want legacy %v", got, syncedFiles)
+	if !reflect.DeepEqual(got, defaultSyncedFiles) {
+		t.Fatalf("nil scope = %v, want legacy %v", got, defaultSyncedFiles)
 	}
 	// DeepEqual cannot detect aliasing; mutating the result must not
-	// touch the shared syncedFiles slice.
+	// touch the shared defaultSyncedFiles slice.
 	got[0] = "x"
-	if syncedFiles[0] == "x" {
-		t.Fatal("nil scope result aliases syncedFiles; want a copy")
+	if defaultSyncedFiles[0] == "x" {
+		t.Fatal("nil scope result aliases defaultSyncedFiles; want a copy")
 	}
 }
 
@@ -44,7 +44,7 @@ func TestSyncableFilesIncludesSettings(t *testing.T) {
 	if !found {
 		t.Fatal("syncableFiles must contain settings.json")
 	}
-	if len(syncableFiles) != len(syncedFiles)+1 {
-		t.Fatalf("syncableFiles len %d, want syncedFiles len %d + 1", len(syncableFiles), len(syncedFiles))
+	if len(syncableFiles) != len(defaultSyncedFiles)+1 {
+		t.Fatalf("syncableFiles len %d, want defaultSyncedFiles len %d + 1", len(syncableFiles), len(defaultSyncedFiles))
 	}
 }

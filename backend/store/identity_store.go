@@ -70,3 +70,16 @@ func (s *IdentityStore) Load() (session.IdentityStoreData, error) {
 	s.lastSavedHash = hash
 	return out, nil
 }
+
+// BlobName, ExportPlain and ImportPlain implement the sync exchange contract
+// (SyncableStore, declared in backend/sync/backend.go).
+
+func (s *IdentityStore) BlobName() string { return identityStoreFileName }
+
+func (s *IdentityStore) ExportPlain() ([]byte, error) {
+	return exportPlainStore(identityStoreFileName, s.filePath(), s.Load)
+}
+
+func (s *IdentityStore) ImportPlain(raw []byte) error {
+	return importPlainStore(raw, s.Save)
+}
