@@ -240,15 +240,6 @@ func (a *App) ContainerConnect(connectionID, sshUser, sshPassword, tunnelUser, t
 		}
 	}
 
-	// 防御性钥匙串兜底，与 CreateSession/SessionStart 一致：Load 的
-	// populatePasswords 理论上已同步填好密码，但若密码只存在系统钥匙串
-	// 中仍未取回，这里补一次，否则非交互拨号会直接认证失败。
-	if sshCfg.Password == "" && sshCfg.ID != "" {
-		if pw, err := a.connectionStore.EnsurePassword(sshCfg.ID); err == nil && pw != "" {
-			sshCfg.Password = pw
-		}
-	}
-
 	// 跳板机的临时账密随 sshCfg 传入，由 setupJumpHostTunnel 内部消费。
 	if tunnelUser != "" {
 		sshCfg.TunnelSSHUser = tunnelUser

@@ -354,6 +354,11 @@ func (a *App) initStores(dataDir string, upgrade bool) {
 		// Normalize enc:v1: fields at the sync boundary using the credential
 		// store (set by initCredentials above).
 		syncSvc.SetPasswordStore(a.credentialStore)
+		// Config-exchange registry: the sync layer holds only SyncableStore
+		// interface values (sync → store would cycle through credentials),
+		// so the concrete stores are assembled here — the only place that
+		// imports both packages.
+		syncSvc.SetStores(a.syncableStores())
 		// Auto-sync on startup if enabled
 		if syncSvc.IsAutoSyncEnabled() {
 			go func() {
@@ -411,6 +416,13 @@ func (a *App) initStores(dataDir string, upgrade bool) {
 // normal path.
 func (a *App) initCredentials(dataDir string, upgrade bool) {
 	cred := credentials.New(dataDir, sync.NewKeychain())
+	// The reset/setup ciphertext guards scan the data dir; the declaring
+	// manifest lives in the store package.
+	secretFiles := make([]string, 0, len(store.SecretFiles))
+	for _, sf := range store.SecretFiles {
+		secretFiles = append(secretFiles, sf.File)
+	}
+	cred.SetSecretFiles(secretFiles)
 
 	if upgrade {
 		// Only this once (the upgrade migration) is worth logging; ordinary
@@ -836,13 +848,24 @@ func (a *App) SaveProxies(data session.ProxyStoreData) error {
 	return a.proxyStore.Save(data)
 }
 
-// ExportConnections writes the full store to destPath as a .utm file. When
-// password is non-empty, password fields are encrypted; otherwise cleared.
+// ExportConnections writes the full store to destPath as a .utm file. Every
+// identity-referencing connection is materialized first — the identity store
+// itself is not exported, so the credentials travel inside the connections
+// and the file never depends on this machine's identity store — and all
+// manifest-declared secret fields are encrypted with password.
 func (a *App) ExportConnections(destPath, password string) error {
 	if a.connectionStore == nil {
 		return fmt.Errorf("connection store not initialized")
 	}
 	data, err := a.connectionStore.Load()
+	if err != nil {
+		return err
+	}
+	resolve, err := a.identityResolver()
+	if err != nil {
+		return err
+	}
+	data, err = importer.MaterializeForExport(data, resolve)
 	if err != nil {
 		return err
 	}
@@ -1302,8 +1325,44 @@ func (a *App) ClearBackgroundImage() error {
 	return nil
 }
 
-// reloadStoresAfterSync reloads connections and settings from disk and emits
-// events so the frontend refreshes after a sync pull.
+// syncableStores assembles the config-exchange registry handed to the sync
+// service. It lives in app.go because this is the only package that imports
+// both backend/sync and backend/store — the concrete stores satisfy
+// sync.SyncableStore structurally, so neither package needs to import the
+// other (sync → store would cycle through credentials). A store that failed
+// to init is skipped: sync then never exchanges that blob, instead of
+// panicking on a nil receiver.
+func (a *App) syncableStores() []sync.SyncableStore {
+	stores := make([]sync.SyncableStore, 0, 8)
+	if a.connectionStore != nil {
+		stores = append(stores, a.connectionStore)
+	}
+	if a.identityStore != nil {
+		stores = append(stores, a.identityStore)
+	}
+	if a.proxyStore != nil {
+		stores = append(stores, a.proxyStore)
+	}
+	if a.aiConfigStore != nil {
+		stores = append(stores, a.aiConfigStore)
+	}
+	if a.favoriteStore != nil {
+		stores = append(stores, a.favoriteStore)
+	}
+	if a.quickCommandsStore != nil {
+		stores = append(stores, a.quickCommandsStore)
+	}
+	if a.tunnelStore != nil {
+		stores = append(stores, a.tunnelStore)
+	}
+	if a.settingsStore != nil {
+		stores = append(stores, a.settingsStore)
+	}
+	return stores
+}
+
+// reloadStoresAfterSync reloads every store a sync pull may have rewritten
+// and emits events so the frontend refreshes without a restart.
 func (a *App) reloadStoresAfterSync() {
 	if a.connectionStore != nil {
 		if data, err := a.connectionStore.Load(); err == nil {
@@ -1333,6 +1392,16 @@ func (a *App) reloadStoresAfterSync() {
 	if a.proxyStore != nil {
 		if data, err := a.proxyStore.Load(); err == nil {
 			a.emit("store:proxies:changed", data)
+		}
+	}
+	if a.favoriteStore != nil {
+		if data, err := a.favoriteStore.Load(); err == nil {
+			a.emit("store:favorites:changed", data)
+		}
+	}
+	if a.tunnelStore != nil {
+		if data, err := a.tunnelStore.Load(); err == nil {
+			a.emit("store:tunnels:changed", data)
 		}
 	}
 }
@@ -1950,6 +2019,13 @@ func (a *App) RelaunchApp() {
 	a.app.Quit()
 }
 
+// QuitApp exits the application. The unlock dialog offers it so a user who
+// wants neither to unlock nor to clear credentials is never forced into
+// either choice.
+func (a *App) QuitApp() {
+	a.app.Quit()
+}
+
 func (a *App) CheckForUpdate(source string) (*update.UpdateInfo, error) {
 	return update.Check(Version, source)
 }
@@ -2049,6 +2125,7 @@ type CredentialStatus struct {
 	Unlocked        bool   `json:"unlocked"`
 	NeedsSetup      bool   `json:"needsSetup"`
 	KeychainLost    bool   `json:"keychainLost"`
+	DecryptFailed   bool   `json:"decryptFailed"`
 	ExistingSecrets int    `json:"existingSecrets"`
 }
 
@@ -2067,6 +2144,12 @@ func (a *App) SetDataDir(kind, customDir string, migrate bool) error {
 	target, err := dataDirFor(kind, customDir)
 	if err != nil {
 		return err
+	}
+	// Migrating onto the current data dir (or into a directory inside it)
+	// would copyDir the dir onto itself and then removeDataDir the only
+	// copy. Refuse before anything is touched.
+	if a.dataDir != "" && dataDirContains(a.dataDir, target) {
+		return fmt.Errorf("the chosen directory is the current data dir (or inside it): %s", target)
 	}
 	if !isWritable(target) {
 		return fmt.Errorf("directory not writable: %s", target)
@@ -2128,10 +2211,11 @@ func (a *App) GetCredentialStatus() (CredentialStatus, error) {
 	}
 	st := a.credentialStore.Status()
 	return CredentialStatus{
-		Mode:         st.Mode,
-		Unlocked:     st.Unlocked,
-		NeedsSetup:   st.NeedsSetup,
-		KeychainLost: st.KeychainLost,
+		Mode:          st.Mode,
+		Unlocked:      st.Unlocked,
+		NeedsSetup:    st.NeedsSetup,
+		KeychainLost:  st.KeychainLost,
+		DecryptFailed: st.DecryptFailed,
 	}, nil
 }
 
@@ -2297,15 +2381,34 @@ func (a *App) reencryptAll(cs *credentials.Store, oldKey, newKey []byte) error {
 	return nil
 }
 
-// clearEncryptedFields rewrites connections.json and settings.json with empty
-// secret fields WITHOUT decrypting. It must work while the credential store is
-// locked (keychain-lost / reset), when Load()/Save() would fail because they
-// require the master key to decrypt the very fields we are clearing.
+// dataDirContains reports whether sub denotes the same directory as dir or
+// lies inside it. The comparison is lexical after Clean — the migration guard
+// runs before the target necessarily exists, so there is no filesystem
+// round-trip to resolve symlinks through; Windows paths are case-insensitive.
+func dataDirContains(dir, sub string) bool {
+	dir, sub = filepath.Clean(dir), filepath.Clean(sub)
+	if goruntime.GOOS == "windows" {
+		dir, sub = strings.ToLower(dir), strings.ToLower(sub)
+	}
+	if dir == sub {
+		return true
+	}
+	rel, err := filepath.Rel(dir, sub)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// clearEncryptedFields blanks every manifest-declared secret field WITHOUT
+// decrypting. It must work while the credential store is gone (reset), when
+// Load()/Save() would fail because they require the master key to decrypt the
+// very fields being cleared. The field list is the store's secret-field
+// manifest — the same one encryption and the setup guard derive from; the
+// hand-written list this used to be missed key content and ai.json, leaving
+// ciphertext behind that wedged the next Setup.
 func (a *App) clearEncryptedFields() {
-	clearSecretsInFile(filepath.Join(a.dataDir, "connections.json"), "connections")
-	clearSecretsInFile(filepath.Join(a.dataDir, "settings.json"), "settings")
-	clearSecretsInFile(filepath.Join(a.dataDir, "identities.json"), "identities")
-	clearSecretsInFile(filepath.Join(a.dataDir, "proxies.json"), "proxies")
+	store.ClearAllSecretFields(a.dataDir)
 }
 
 // clearSecretsInFile blanks the secret fields (connections[].password or

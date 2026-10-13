@@ -1,15 +1,11 @@
 package store
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"sync"
 
-	"github.com/ys-ll/uniterm/backend/credentials"
 	"github.com/ys-ll/uniterm/backend/session"
 )
 
@@ -24,12 +20,10 @@ type PasswordStore interface {
 
 type ConnectionStore struct {
 	configDir     string
-	passwordStore PasswordStore       // nil = passwords kept in JSON (backward compat)
-	legacy         LegacyPasswordSource // optional fallback to pre-enc:v1 keychain entries
-	mu            sync.Mutex    // serializes Save + populatePasswords writes (STORE-05/06).
-	pwdMu         sync.RWMutex  // guards pwdCache for F-110 async keychain fill.
-	pwdCache      map[string]string
-	lastSavedHash string // F-105: skip no-op rewrites keyed by canonical content hash.
+	passwordStore PasswordStore        // nil = encrypted fields pass through untouched (backward compat)
+	legacy        LegacyPasswordSource // optional fallback to pre-enc:v1 keychain entries
+	mu            sync.Mutex           // serializes Save + Load lazy re-encrypts (STORE-05/06).
+	lastSavedHash string               // F-105: skip no-op rewrites keyed by canonical content hash.
 }
 
 func NewConnectionStore(configDir string) (*ConnectionStore, error) {
@@ -39,8 +33,8 @@ func NewConnectionStore(configDir string) (*ConnectionStore, error) {
 	return &ConnectionStore{configDir: configDir}, nil
 }
 
-// SetPasswordStore sets the external password store. Once set, passwords
-// are written to the store and cleared from the JSON file on save.
+// SetPasswordStore sets the external password store. Once set, secret fields
+// are written encrypted and decrypted on load.
 func (s *ConnectionStore) SetPasswordStore(ps PasswordStore) {
 	s.passwordStore = ps
 }
@@ -64,107 +58,37 @@ func (s *ConnectionStore) Save(data session.ConnectionStoreData) error {
 	connections := make([]session.ConnectionConfig, len(data.Connections))
 	copy(connections, data.Connections)
 
-	// Encrypt password fields in place before writing JSON.
 	for i := range connections {
 		conn := &connections[i]
-		if conn.AuthType != "password" {
-			// A cached plaintext login password belongs to password auth
-			// only. Drop it whenever the connection no longer uses that
-			// mode so a later key/keyText connect cannot backfill the stale
-			// password as a key passphrase, which breaks unencrypted keys.
-			s.pwdMu.Lock()
-			delete(s.pwdCache, conn.ID)
-			s.pwdMu.Unlock()
-		}
 		if conn.AuthType == "identity" {
 			// Identity connections obtain credentials solely from the
 			// referenced identity (MaterializeIdentity resolves them at
 			// connect time). A stale password left when switching away from
 			// another auth mode is unused — and, if it still holds an
-			// enc:v1: field, would be carried verbatim into cloud sync
-			// (sync normalization only cleans authType=="password"
-			// connections), surfacing as a literal enc:v1: on other devices
-			// (issue #711). User, however, is the explicit username override
-			// typed into the connection form (issue #959) — plain text by
-			// definition, so it is kept as-is.
+			// enc:v1: field, would be carried verbatim into cloud sync,
+			// surfacing as a literal enc:v1: on other devices (issue #711).
+			// User, however, is the explicit username override typed into
+			// the connection form (issue #959) — plain text by definition,
+			// so it is kept as-is.
 			conn.Password = ""
-			continue
 		}
-		// keyText connections carry the inline private-key text in KeyContent —
-		// a secret like passwords — so encrypt it before it lands in
-		// connections.json. "key" references a path on disk and carries no
-		// inline secret here, so it (and everything else) falls through to the
-		// plain continue.
-		if conn.AuthType == "keyText" {
-			if err := encryptSecretField(&conn.KeyContent, s.passwordStore); err != nil {
-				return err
-			}
-			continue
-		}
-		if conn.AuthType != "password" {
-			continue
-		}
-		if conn.Password == "" {
-			// Password cleared — drop cached plaintext so EnsurePassword can't
-			// resurrect a deleted password.
-			s.pwdMu.Lock()
-			delete(s.pwdCache, conn.ID)
-			s.pwdMu.Unlock()
-			continue
-		}
-		if s.passwordStore == nil {
-			// Fail closed: never write plaintext when no cipher is available.
-			return errors.New("passwordStore not initialized; refusing to save plaintext password")
-		}
-		enc, err := s.passwordStore.Encrypt(conn.Password)
-		if err != nil {
-			return err
-		}
-		s.pwdMu.Lock()
-		if s.pwdCache == nil {
-			s.pwdCache = map[string]string{}
-		}
-		s.pwdCache[conn.ID] = conn.Password
-		s.pwdMu.Unlock()
-		conn.Password = enc
 	}
 
 	saveData := session.ConnectionStoreData{
 		Groups:      data.Groups,
 		Connections: connections,
 	}
-	return s.writeJSONLocked(saveData)
-}
-
-// writeJSONLocked serializes data to the connections file atomically.
-// F-105: uses json.NewEncoder to stream directly to the temp file (no
-// intermediate buffer the size of the output), and skips the temp+sync+rename
-// cycle when the canonical content hash matches the last successful save.
-// Caller must hold s.mu.
-func (s *ConnectionStore) writeJSONLocked(data session.ConnectionStoreData) error {
-	preview, err := json.Marshal(data)
-	if err != nil {
-		return err
+	// Shared Save envelope (filestore.go): hash-skip, encrypt, atomic write.
+	h, err := saveEncryptedFile(storeFileName, s.filePath(), &saveData, s.passwordStore, s.lastSavedHash)
+	s.lastSavedHash = h
+	if errors.Is(err, ErrNoCipher) {
+		return errors.New("passwordStore not initialized; refusing to save plaintext password")
 	}
-	sum := sha256.Sum256(preview)
-	hashHex := hex.EncodeToString(sum[:])
-	if hashHex == s.lastSavedHash {
-		return nil
-	}
-
-	jsonData, err := json.MarshalIndent(data, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := atomicWriteFile(s.filePath(), jsonData, 0600); err != nil {
-		return err
-	}
-	s.lastSavedHash = hashHex
-	return nil
+	return err
 }
 
 func (s *ConnectionStore) Load() (session.ConnectionStoreData, error) {
-	fileData, err := os.ReadFile(s.filePath())
+	raw, err := os.ReadFile(s.filePath())
 	if err != nil {
 		if os.IsNotExist(err) {
 			return session.ConnectionStoreData{
@@ -176,90 +100,68 @@ func (s *ConnectionStore) Load() (session.ConnectionStoreData, error) {
 	}
 
 	// Try new format first: {"groups": [...], "connections": [...]}
-	var data session.ConnectionStoreData
-	if err := json.Unmarshal(fileData, &data); err == nil && (data.Groups != nil || data.Connections != nil) {
-		if data.Groups == nil {
-			data.Groups = []session.ConnectionGroup{}
-		}
-		if data.Connections == nil {
-			data.Connections = []session.ConnectionConfig{}
-		}
-		if err := s.populatePasswords(&data); err != nil {
-			return session.ConnectionStoreData{}, err
-		}
-		return data, nil
+	data, res, err := loadEncryptedData[session.ConnectionStoreData](storeFileName, raw, s.passwordStore)
+	if err == nil && (data.Groups != nil || data.Connections != nil) {
+		return s.finishLoaded(&data, res), nil
+	}
+	if err != nil && !errors.Is(err, errUnparseableConfig) {
+		// Parsed as the new shape but the fields wouldn't decrypt — the file
+		// itself is intact, surface the error instead of quarantining.
+		return session.ConnectionStoreData{}, err
 	}
 
 	// Fallback: old format — plain array of connections
-	var connections []session.ConnectionConfig
-	if err := json.Unmarshal(fileData, &connections); err != nil {
-		// STORE-09: rename corrupt JSON aside before re-attempting.
-		quarantineCorrupt(s.filePath())
+	connections, res, err := loadEncryptedData[[]session.ConnectionConfig](storeFileName, raw, s.passwordStore)
+	if err != nil {
+		if errors.Is(err, errUnparseableConfig) {
+			// STORE-09: rename corrupt JSON aside before re-attempting.
+			quarantineCorrupt(s.filePath())
+		}
 		return session.ConnectionStoreData{}, err
 	}
-	data = session.ConnectionStoreData{
+	return s.finishLoaded(&session.ConnectionStoreData{
 		Groups:      []session.ConnectionGroup{},
 		Connections: connections,
-	}
-	if err := s.populatePasswords(&data); err != nil {
-		return session.ConnectionStoreData{}, err
-	}
-	return data, nil
+	}, res), nil
 }
 
-func (s *ConnectionStore) populatePasswords(data *session.ConnectionStoreData) error {
-	needsSave := false
+// finishLoaded normalizes nil slices and applies the load-time policies the
+// manifest walk can't express: the legacy keychain backfill with move
+// semantics (entries are deleted once the re-encrypted copy is on disk, so a
+// user-cleared password can't resurrect on the next load), and the lazy
+// re-encrypt of legacy plaintext (and orphaned enc:v1 residue left by older
+// auth-type-conditional builds).
+func (s *ConnectionStore) finishLoaded(data *session.ConnectionStoreData, res DecryptResult) session.ConnectionStoreData {
+	if data.Groups == nil {
+		data.Groups = []session.ConnectionGroup{}
+	}
+	if data.Connections == nil {
+		data.Connections = []session.ConnectionConfig{}
+	}
+	needsSave := res.Plaintext > 0
+
+	// Connections backfilled from the legacy keychain are tracked so their
+	// entries are deleted once the re-encrypted copy is on disk — move
+	// semantics: a copy kept forever is what let a user-cleared password
+	// resurrect on the next load, since the backfill is keyed on an empty
+	// JSON field.
+	var backfilled []string
 
 	for i := range data.Connections {
 		conn := &data.Connections[i]
-		if conn.AuthType == "keyText" && conn.KeyContent != "" && credentials.IsEncrypted(conn.KeyContent) && s.passwordStore != nil {
-			dec, err := s.passwordStore.Decrypt(conn.KeyContent)
-			if err != nil {
-				return err
-			}
-			conn.KeyContent = dec
-		}
-		if conn.AuthType != "password" {
-			continue
-		}
-		if conn.Password == "" {
-			// No enc:v1 field. Under the pre-enc:v1 scheme the password lived
-			// in the keychain under conn/<id> and the JSON field was omitted;
-			// recover it here so the value stays visible without a manual
-			// re-entry. Falls back to "" when neither source has it.
-			if s.legacy != nil {
-				if pw, err := s.legacy.GetPassword(conn.ID); err == nil && pw != "" {
-					s.pwdMu.Lock()
-					if s.pwdCache == nil {
-						s.pwdCache = map[string]string{}
-					}
-					s.pwdCache[conn.ID] = pw
-					s.pwdMu.Unlock()
-					conn.Password = pw
-					needsSave = true // lazy-migrate into enc:v1 on next save
-				}
+		if conn.AuthType == "password" && conn.Password == "" && s.legacy != nil {
+			// Pre-enc:v1: the password lived in the keychain under conn/<id>
+			// and the JSON field was omitted; recover it so the value stays
+			// visible without a manual re-entry. Password auth only —
+			// key/keyText passphrases never went through the legacy keychain,
+			// and backfilling them would break unencrypted keys. Falls back
+			// to "" when neither source has it.
+			if pw, err := s.legacy.GetPassword(conn.ID); err == nil && pw != "" {
+				conn.Password = pw
+				backfilled = append(backfilled, conn.ID)
+				needsSave = true // lazy-migrate into enc:v1 on next save
 			}
 			continue
-		}
-		if s.passwordStore == nil {
-			continue // no cipher wired — leave as-is (backward compat)
-		}
-		if credentials.IsEncrypted(conn.Password) {
-			pw, err := s.passwordStore.Decrypt(conn.Password)
-			if err != nil {
-				return err
-			}
-			s.pwdMu.Lock()
-			if s.pwdCache == nil {
-				s.pwdCache = map[string]string{}
-			}
-			s.pwdCache[conn.ID] = pw
-			s.pwdMu.Unlock()
-			conn.Password = pw
-		} else {
-			// Legacy plaintext on disk (never migrated to keychain). Keep the
-			// plaintext for the caller but re-save so it lands encrypted.
-			needsSave = true
 		}
 	}
 
@@ -267,63 +169,45 @@ func (s *ConnectionStore) populatePasswords(data *session.ConnectionStoreData) e
 		clean := *data
 		clean.Connections = make([]session.ConnectionConfig, len(data.Connections))
 		copy(clean.Connections, data.Connections)
+		// Best-effort lazy re-encrypt: a missing cipher or an encrypt error
+		// leaves the file untouched; the plaintext re-encrypts on next Save.
+		// forceWrite bypasses the hash-skip: the plaintext content is
+		// unchanged on disk, so the seeded hash would match and the lazy
+		// encryption would never run (docs 4.3). On error the envelope
+		// returns "" so the next Save retries the re-encrypt.
+		h, _ := saveEncryptedFile(storeFileName, s.filePath(), &clean, s.passwordStore, forceWrite)
 		s.mu.Lock()
-		defer s.mu.Unlock()
-		return s.writeJSONLocked(s.encryptForSaveLocked(clean))
+		s.lastSavedHash = h
+		s.mu.Unlock()
+		// The re-encrypted copy is on disk — delete the legacy entries (move
+		// semantics: a kept-forever copy is what let a user-cleared password
+		// resurrect on the next load, since the backfill keys on an empty
+		// JSON field). Best-effort: a failed delete leaves a stale entry that
+		// only resurfaces if that password is cleared later.
+		for _, id := range backfilled {
+			_ = s.legacy.DeletePassword(id)
+		}
+	} else {
+		// Seed the skip-state from the just-loaded content so an unchanged
+		// first Save after startup skips the rewrite.
+		if hashHex, err := jsonHash(*data); err == nil {
+			s.mu.Lock()
+			s.lastSavedHash = hashHex
+			s.mu.Unlock()
+		}
 	}
-	return nil
+	return *data
 }
 
-// encryptForSaveLocked returns a copy of data with plaintext password fields
-// encrypted. Caller must hold s.mu.
-func (s *ConnectionStore) encryptForSaveLocked(data session.ConnectionStoreData) session.ConnectionStoreData {
-	out := data
-	out.Connections = make([]session.ConnectionConfig, len(data.Connections))
-	copy(out.Connections, data.Connections)
-	for i := range out.Connections {
-		conn := &out.Connections[i]
-		if conn.AuthType != "password" || conn.Password == "" || credentials.IsEncrypted(conn.Password) {
-			continue
-		}
-		if s.passwordStore == nil {
-			continue
-		}
-		enc, err := s.passwordStore.Encrypt(conn.Password)
-		if err != nil {
-			continue // best-effort; the plaintext remains, encrypted on next Save
-		}
-		conn.Password = enc
-	}
-	return out
+// BlobName, ExportPlain and ImportPlain implement the sync exchange contract
+// (SyncableStore, declared in backend/sync/backend.go).
+
+func (s *ConnectionStore) BlobName() string { return storeFileName }
+
+func (s *ConnectionStore) ExportPlain() ([]byte, error) {
+	return exportPlainStore(storeFileName, s.filePath(), s.Load)
 }
 
-// EnsurePassword returns the cached decrypted password for a connection ID.
-// Load() fills the cache synchronously from encrypted fields, so this is a
-// defensive fallback for callers that construct configs without going through
-// Load. On a cache miss it tries the legacy keychain (conn/<id>) so a connect
-// attempt can still recover a password that was never migrated into enc:v1.
-// Returns "" when there is no cached entry and no legacy keychain value.
-func (s *ConnectionStore) EnsurePassword(connID string) (string, error) {
-	s.pwdMu.RLock()
-	pw, ok := s.pwdCache[connID]
-	s.pwdMu.RUnlock()
-	if ok {
-		return pw, nil
-	}
-	if s.legacy == nil {
-		return "", nil
-	}
-	pw, err := s.legacy.GetPassword(connID)
-	if err != nil {
-		return "", nil
-	}
-	if pw != "" {
-		s.pwdMu.Lock()
-		if s.pwdCache == nil {
-			s.pwdCache = map[string]string{}
-		}
-		s.pwdCache[connID] = pw
-		s.pwdMu.Unlock()
-	}
-	return pw, nil
+func (s *ConnectionStore) ImportPlain(raw []byte) error {
+	return importPlainStore(raw, s.Save)
 }

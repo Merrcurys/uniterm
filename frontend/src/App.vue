@@ -394,7 +394,10 @@ const keychainLostVisible = ref(false)
 function resolveCredentialDialog() {
   if (credStore.status.keychainLost) { keychainLostVisible.value = true; return }
   if (credStore.status.needsSetup) { encryptVisible.value = true; return }
-  if (!credStore.status.unlocked && credStore.status.mode === 'master-password') {
+  // DecryptFailed covers both modes: a recovered key that cannot open the
+  // data must be answered with the master password (master-password mode) or
+  // clearing credentials (keychain mode) — never with a silent blank UI.
+  if (credStore.status.decryptFailed || (!credStore.status.unlocked && credStore.status.mode === 'master-password')) {
     unlockVisible.value = true
   }
 }

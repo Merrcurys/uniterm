@@ -18,23 +18,6 @@ func sampleStore() session.ConnectionStoreData {
 	}
 }
 
-func TestExportUnitermWithoutPasswordClearsPassword(t *testing.T) {
-	b, err := ExportUniterm(sampleStore(), "")
-	if err != nil {
-		t.Fatalf("export: %v", err)
-	}
-	var f utmFile
-	if err := json.Unmarshal(b, &f); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if f.Encrypted {
-		t.Fatal("expected encrypted=false")
-	}
-	if f.Connections[0].Password != "" {
-		t.Fatalf("password not cleared: %q", f.Connections[0].Password)
-	}
-}
-
 func TestUnitermRoundTripWithPassword(t *testing.T) {
 	b, err := ExportUniterm(sampleStore(), "pass123")
 	if err != nil {
@@ -96,5 +79,94 @@ func TestUnitermWrongPasswordFails(t *testing.T) {
 	}
 	if _, err := parseUniterm(b, ParseOptions{}); err == nil {
 		t.Fatal("expected error for missing password")
+	}
+}
+
+// TestMaterializeForExport pins the export materialization: every
+// identity-referencing connection is resolved into a plain credential
+// connection, so the exported file is self-contained — no authType
+// "identity" survives and nothing references the source machine's identity
+// store. A dangling reference degrades to a connection without credentials.
+func TestMaterializeForExport(t *testing.T) {
+	data := session.ConnectionStoreData{
+		Connections: []session.ConnectionConfig{
+			{ID: "c1", AuthType: "identity", IdentityId: "id1", Host: "h", Port: 22},
+			{ID: "c2", AuthType: "identity", IdentityId: "gone", Host: "h2", Port: 22, User: "override"},
+			{ID: "c3", AuthType: "keyText", Host: "h3", Port: 22, KeyContent: "PEM"},
+		},
+	}
+	idents := map[string]session.Identity{
+		"id1": {ID: "id1", Name: "prod", Username: "deploy", AuthType: "password", Password: "secret"},
+	}
+	out, err := MaterializeForExport(data, func(id string) (session.Identity, bool) {
+		i, ok := idents[id]
+		return i, ok
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs := out.Connections
+	if cs[0].AuthType != "password" || cs[0].User != "deploy" || cs[0].Password != "secret" || cs[0].IdentityId != "" {
+		t.Fatalf("c1 not materialized: %+v", cs[0])
+	}
+	// A dangling reference degrades to no credentials; the connection's own
+	// username override is kept (it never came from the identity).
+	if cs[1].AuthType != "password" || cs[1].User != "override" || cs[1].Password != "" || cs[1].IdentityId != "" {
+		t.Fatalf("c2 dangling reference not degraded: %+v", cs[1])
+	}
+	if cs[2].AuthType != "keyText" || cs[2].KeyContent != "PEM" {
+		t.Fatalf("non-identity connection must pass through: %+v", cs[2])
+	}
+}
+
+// TestExportUnitermEncryptsAllSecretFields: the export encrypts every field
+// the save path treats as secret — the manifest list — so a private key never
+// rides along in cleartext inside an "encrypted" export.
+func TestExportUnitermEncryptsAllSecretFields(t *testing.T) {
+	data := session.ConnectionStoreData{
+		Connections: []session.ConnectionConfig{
+			{ID: "c1", Type: "ssh", AuthType: "keyText", Host: "h", Port: 22,
+				KeyContent: "-----BEGIN OPENSSH PRIVATE KEY-----", Password: "keypass"},
+		},
+	}
+	b, err := ExportUniterm(data, "pass123")
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	var f utmFile
+	if err := json.Unmarshal(b, &f); err != nil {
+		t.Fatal(err)
+	}
+	if p := f.Connections[0].KeyContent; !strings.HasPrefix(p, "enc:v1:") {
+		t.Fatalf("key content exported in cleartext: %q", p)
+	}
+	res, err := parseUniterm(b, ParseOptions{Password: "pass123"})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if res.Connections[0].KeyContent != "-----BEGIN OPENSSH PRIVATE KEY-----" || res.Connections[0].Password != "keypass" {
+		t.Fatalf("round-trip lost secrets: %+v", res.Connections[0])
+	}
+}
+
+// TestExportUnitermRejectsInPlaceCiphertext: a value still encrypted under
+// the source machine's credential store would make the export depend on that
+// machine — the export refuses instead of silently carrying it.
+func TestExportUnitermRejectsInPlaceCiphertext(t *testing.T) {
+	data := session.ConnectionStoreData{
+		Connections: []session.ConnectionConfig{
+			{ID: "c1", Type: "ssh", AuthType: "password", Host: "h", Port: 22, Password: "enc:v1:residue"},
+		},
+	}
+	if _, err := ExportUniterm(data, "pass123"); err == nil {
+		t.Fatal("in-place ciphertext must abort the export")
+	}
+}
+
+// TestExportUnitermRequiresPassword: the UI always provides one; the
+// password-less branch (which cleared every credential) is gone.
+func TestExportUnitermRequiresPassword(t *testing.T) {
+	if _, err := ExportUniterm(sampleStore(), ""); err == nil {
+		t.Fatal("an export without a password must be refused")
 	}
 }
