@@ -1588,6 +1588,7 @@
   "unlock.password": "Master-Passwort",
   "unlock.reset": "Zugangsdaten löschen",
   "unlock.resetConfirm": "Alle gespeicherten Passwörter, privaten Schlüssel und API-Schlüssel werden gelöscht (Verbindungen bleiben erhalten), und die Verschlüsselung muss neu eingerichtet werden. Dies kann nicht rückgängig gemacht werden. Fortfahren?",
+  "unlock.decryptFailedHint": "Die gespeicherten Daten lassen sich mit dem aktuellen Schlüssel dieses Rechners nicht entschlüsseln. Geben Sie das Master-Passwort dieser Daten ein; lässt es sich nicht wiederherstellen, können die Zugangsdaten gelöscht und neu eingerichtet werden.",
   "unlock.quit": "Abbrechen und beenden",
   "unlock.title": "Anmeldedaten entsperren",
   "settings.storageSecurity": "Speicher & Sicherheit",

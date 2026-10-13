@@ -1588,6 +1588,7 @@
   "unlock.password": "Contraseña maestra",
   "unlock.reset": "Borrar credenciales",
   "unlock.resetConfirm": "Se borrarán todas las contraseñas, claves privadas y claves API guardadas (las conexiones se conservan) y habrá que configurar de nuevo el cifrado. No se puede deshacer. ¿Continuar?",
+  "unlock.decryptFailedHint": "Los datos guardados no se pueden descifrar con la clave actual de esta máquina. Introduzca la contraseña maestra de estos datos; si no se puede recuperar, borre las credenciales y configure de nuevo.",
   "unlock.quit": "Cancelar y salir",
   "unlock.title": "Desbloquear credenciales",
   "settings.storageSecurity": "Almacenamiento y seguridad",

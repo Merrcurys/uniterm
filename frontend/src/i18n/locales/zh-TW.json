@@ -1588,6 +1588,7 @@
   "unlock.password": "主密碼",
   "unlock.reset": "清空憑證",
   "unlock.resetConfirm": "將清除所有已儲存的密碼、私鑰和 API 金鑰（連線本身保留），並需要重新設定加密方式。清除後無法復原。繼續？",
+  "unlock.decryptFailedHint": "已儲存的資料無法用本機目前金鑰解密。請輸入這份資料的主密碼；若無法找回，可清空憑證後重新設定。",
   "unlock.quit": "取消並離開",
   "unlock.title": "解鎖憑證",
   "settings.storageSecurity": "儲存與安全",

@@ -8,6 +8,7 @@
     :close-on-press-escape="false"
     :show-close="false"
   >
+    <p v-if="cred.status.decryptFailed" class="form-hint">{{ t('unlock.decryptFailedHint') }}</p>
     <el-input v-model="pw" type="password" show-password :placeholder="t('unlock.password')" @keyup.enter="onUnlock" />
     <div v-if="errorMsg" class="form-error">{{ errorMsg }}</div>
     <template #footer>
@@ -60,4 +61,5 @@ function onCancel() { emit('update:visible', false) }
 
 <style scoped>
 .form-error { color: var(--el-color-danger); font-size: 0.8125rem; margin-top: 0.5rem; }
+.form-hint { color: var(--el-text-color-secondary); font-size: 0.8125rem; margin: 0 0 0.5rem; }
 </style>

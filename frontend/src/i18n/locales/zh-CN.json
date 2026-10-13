@@ -1570,6 +1570,7 @@
   "unlock.confirm": "解锁",
   "unlock.reset": "清空凭据",
   "unlock.resetConfirm": "将清除所有已保存的密码、私钥和 API 密钥（连接本身保留），并需要重新设置加密方式。清除后无法恢复。继续？",
+  "unlock.decryptFailedHint": "已保存的数据无法用本机当前钥匙解密。请输入这份数据的主密码；若无法找回，可清空凭据后重新设置。",
   "unlock.quit": "取消并退出",
   "keychainLost.title": "无法解锁凭证",
   "keychainLost.desc": "加密密钥保存在本机系统钥匙串中，但未能找到。这通常发生在换机器、重装系统或清除了钥匙串后。凭证无法恢复，需要重新输入所有连接密码和 API 密钥。",

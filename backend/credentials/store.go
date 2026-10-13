@@ -2,6 +2,7 @@ package credentials
 
 import (
 	"bytes"
+	"encoding/json"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -27,6 +28,13 @@ type Status struct {
 	Unlocked     bool
 	NeedsSetup   bool
 	KeychainLost bool
+	// DecryptFailed marks the state where a key was recovered but cannot
+	// open the data dir's ciphertext (e.g. data restored from another
+	// machine while a stale key survived in the keychain). The unlock
+	// dialog must be shown; in master-password mode the right password
+	// recovers the data, in keychain mode the way out is clearing
+	// credentials.
+	DecryptFailed bool
 }
 
 // Store owns the master key used to encrypt/decrypt secret fields. The key
@@ -39,10 +47,11 @@ type Store struct {
 	secretFiles []string
 	dataDir  string
 	keychain Keychain
-	mu       stdsync.Mutex
-	mode     string
-	salt     []byte
-	key      []byte
+	mu            stdsync.Mutex
+	mode          string
+	salt          []byte
+	key           []byte
+	decryptFailed bool
 }
 
 func New(dataDir string, kc Keychain) *Store {
@@ -62,10 +71,14 @@ func (s *Store) DirHash() string {
 func (s *Store) Status() Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	st := Status{Mode: s.mode, Unlocked: s.key != nil}
+	st := Status{Mode: s.mode, Unlocked: s.key != nil, DecryptFailed: s.decryptFailed}
 	if s.mode == "" {
 		st.NeedsSetup = true
-	} else if s.mode == ModeKeychain && s.key == nil {
+	} else if s.mode == ModeKeychain && s.key == nil && !s.decryptFailed {
+		// KeychainLost means the entry is truly absent. A failed
+		// verification (entry present but the key cannot open the data)
+		// stays DecryptFailed — the remedies differ: lost offers only
+		// clearing, decrypt-failed also asks for the master password.
 		st.KeychainLost = true
 	}
 	return st
@@ -103,6 +116,24 @@ func (s *Store) AutoUnlock() error {
 		}
 	default:
 		return fmt.Errorf("unknown credential mode %q", meta.Mode)
+	}
+	// A recovered key must actually open the data before it counts as
+	// unlocked: keychain entries are scoped by data-dir path, so a stale
+	// key from a previous setup can survive a data replacement (restore,
+	// copy from another machine) and previously passed as a successful
+	// unlock — every field then failed to decrypt on a blank UI with no
+	// prompt. On failure the state surfaces as DecryptFailed: the unlock
+	// dialog offers the master password (master-password mode) and clearing
+	// credentials (the only way out in keychain mode, where no password can
+	// re-derive the random key).
+	if !s.verifyKey(key) {
+		// set() clears the flag (a committed key means verified); the flag
+		// is therefore set after it, on top of the key-less state.
+		s.set(meta.Mode, meta.Salt, nil)
+		s.mu.Lock()
+		s.decryptFailed = true
+		s.mu.Unlock()
+		return nil
 	}
 	s.set(meta.Mode, meta.Salt, key)
 	return nil
@@ -159,6 +190,12 @@ func (s *Store) Unlock(masterPassword string) error {
 		return errors.New("not in master-password mode")
 	}
 	key := unitsync.DeriveKey(masterPassword, salt)
+	// Verify before caching: the cached entry may hold a key this data
+	// cannot be opened with, and a failed attempt must not overwrite it
+	// with another one that cannot either.
+	if !s.verifyKey(key) {
+		return ErrWrongMasterPassword
+	}
 	// Cache the derived key for future auto-unlock.
 	if err := s.keychain.Set("master-key/"+s.DirHash(), hex.EncodeToString(key)); err != nil {
 		return err
@@ -236,7 +273,63 @@ func (s *Store) currentKey() []byte {
 func (s *Store) set(mode string, salt, key []byte) {
 	s.mu.Lock()
 	s.mode, s.salt, s.key = mode, salt, key
+	s.decryptFailed = false
 	s.mu.Unlock()
+}
+
+// ErrWrongMasterPassword reports a master password that does not decrypt the
+// data dir's ciphertext. Distinct from a formatting error so the unlock
+// dialog can re-prompt instead of treating it as a setup problem.
+var ErrWrongMasterPassword = errors.New("master password does not decrypt this data")
+
+// verifyKey reports whether key actually decrypts the data dir's ciphertext:
+// the wired secret files are scanned for the first enc:v1 value and one
+// decryption is attempted. A dir without ciphertext verifies trivially —
+// there is nothing a wrong key could break (fresh install, post-reset). The
+// generic JSON walk is deliberate: the field manifest lives in the store
+// package, which cannot be imported from here (store → credentials).
+func (s *Store) verifyKey(key []byte) bool {
+	s.mu.Lock()
+	files := s.secretFiles
+	s.mu.Unlock()
+	for _, name := range files {
+		data, err := os.ReadFile(filepath.Join(s.dataDir, name))
+		if err != nil || !bytes.Contains(data, []byte(Prefix)) {
+			continue
+		}
+		var obj interface{}
+		if err := json.Unmarshal(data, &obj); err != nil {
+			return false // unreadable shape while carrying ciphertext: assume the worst
+		}
+		if v, ok := firstEncryptedValue(obj); ok {
+			_, err := DecryptField(v, key)
+			return err == nil
+		}
+	}
+	return true
+}
+
+// firstEncryptedValue returns the first string value carrying the in-place
+// ciphertext prefix, walking objects and arrays generically.
+func firstEncryptedValue(node interface{}) (string, bool) {
+	switch n := node.(type) {
+	case map[string]interface{}:
+		for _, v := range n {
+			if s, ok := v.(string); ok && IsEncrypted(s) {
+				return s, true
+			}
+			if found, ok := firstEncryptedValue(v); ok {
+				return found, true
+			}
+		}
+	case []interface{}:
+		for _, v := range n {
+			if found, ok := firstEncryptedValue(v); ok {
+				return found, true
+			}
+		}
+	}
+	return "", false
 }
 
 // ErrKeychainNotFound marks a keychain entry that is truly absent (as opposed

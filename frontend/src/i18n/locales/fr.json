@@ -1588,6 +1588,7 @@
   "unlock.password": "Mot de passe principal",
   "unlock.reset": "Effacer les identifiants",
   "unlock.resetConfirm": "Tous les mots de passe, clés privées et clés API enregistrés seront supprimés (les connexions sont conservées) et le chiffrement devra être reconfiguré. Action irréversible. Continuer ?",
+  "unlock.decryptFailedHint": "Les données enregistrées ne peuvent pas être déchiffrées avec la clé actuelle de cette machine. Saisissez le mot de passe maître de ces données ; s'il est introuvable, vous pouvez effacer les identifiants et reconfigurer.",
   "unlock.quit": "Annuler et quitter",
   "unlock.title": "Déverrouiller les identifiants",
   "settings.storageSecurity": "Stockage et sécurité",

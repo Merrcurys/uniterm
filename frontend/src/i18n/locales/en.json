@@ -1570,6 +1570,7 @@
   "unlock.confirm": "Unlock",
   "unlock.reset": "Clear credentials",
   "unlock.resetConfirm": "This clears all saved passwords, private keys and API keys (connections are kept) and requires setting up encryption again. This cannot be undone. Continue?",
+  "unlock.decryptFailedHint": "The saved data cannot be decrypted with this machine's current key. Enter the master password for this data; if it cannot be recovered, clear the credentials and set up again.",
   "unlock.quit": "Cancel and quit",
   "keychainLost.title": "Cannot unlock credentials",
   "keychainLost.desc": "The encryption key is stored in this machine's keychain but could not be found. This usually happens after switching machines, reinstalling, or clearing the keychain. Credentials cannot be recovered; re-enter all connection passwords and API keys.",

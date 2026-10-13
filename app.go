@@ -2125,6 +2125,7 @@ type CredentialStatus struct {
 	Unlocked        bool   `json:"unlocked"`
 	NeedsSetup      bool   `json:"needsSetup"`
 	KeychainLost    bool   `json:"keychainLost"`
+	DecryptFailed   bool   `json:"decryptFailed"`
 	ExistingSecrets int    `json:"existingSecrets"`
 }
 
@@ -2210,10 +2211,11 @@ func (a *App) GetCredentialStatus() (CredentialStatus, error) {
 	}
 	st := a.credentialStore.Status()
 	return CredentialStatus{
-		Mode:         st.Mode,
-		Unlocked:     st.Unlocked,
-		NeedsSetup:   st.NeedsSetup,
-		KeychainLost: st.KeychainLost,
+		Mode:          st.Mode,
+		Unlocked:      st.Unlocked,
+		NeedsSetup:    st.NeedsSetup,
+		KeychainLost:  st.KeychainLost,
+		DecryptFailed: st.DecryptFailed,
 	}, nil
 }
 
