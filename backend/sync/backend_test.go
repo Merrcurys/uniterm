@@ -223,7 +223,7 @@ func TestConfigExchangeRefusesEmptyRegistry(t *testing.T) {
 	if _, err := storesMatchDir(nil, files, dir); err == nil {
 		t.Error("storesMatchDir with no registry must fail")
 	}
-	if err := encryptStoresScoped(nil, files, t.TempDir(), testKey); err == nil {
+	if err := encryptStoresScoped(nil, files, t.TempDir(), testKey, nil); err == nil {
 		t.Error("encryptStoresScoped with no registry must fail")
 	}
 	if err := decryptStoresScoped(nil, files, dir, testKey); err == nil {
@@ -252,7 +252,7 @@ func TestConfigExchangeRefusesPartialRegistry(t *testing.T) {
 	if _, err := storesMatchDir(partial, files, dir); err == nil {
 		t.Error("storesMatchDir with a scoped file missing from the registry must fail")
 	}
-	if err := encryptStoresScoped(partial, files, t.TempDir(), testKey); err == nil {
+	if err := encryptStoresScoped(partial, files, t.TempDir(), testKey, nil); err == nil {
 		t.Error("encryptStoresScoped with a scoped file missing from the registry must fail")
 	}
 	if err := decryptStoresScoped(partial, files, staging, testKey); err == nil {

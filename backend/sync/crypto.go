@@ -186,7 +186,21 @@ func WriteSaltFile(repoPath string, salt []byte) error {
 // was never written reports fs.ErrNotExist from ExportPlain — sync skips
 // it instead of uploading an empty document that would clobber the remote
 // copy.
-func encryptStoresScoped(stores []SyncableStore, files []string, destDir string, key []byte) error {
+//
+// Two change-detection rules keep a one-file edit from rewriting every
+// blob — the per-blob nonce is random, so re-encrypting unchanged content
+// yields different bytes and the commit/upload would carry the whole
+// config. Both compare plaintext, never generated ciphertext:
+//
+//   - skip names blobs the caller already knows are unchanged (snapshot
+//     mode diffs the store exports against the remote manifest's plaintext
+//     hashes); they are not staged, so the remote keeps its copy.
+//   - otherwise, a blob already present in destDir that decrypts to the
+//     export is left alone (git mode: the working tree holds the previous
+//     ciphertext, so the commit only carries files whose content moved).
+//     The comparison is on the decrypted plaintext, so a stale or foreign
+//     blob never survives by accident.
+func encryptStoresScoped(stores []SyncableStore, files []string, destDir string, key []byte, skip map[string]bool) error {
 	if err := requireStores(stores, files); err != nil {
 		return err
 	}
@@ -204,12 +218,18 @@ func encryptStoresScoped(stores []SyncableStore, files []string, destDir string,
 		if !wanted[name] {
 			continue
 		}
+		if skip[name] {
+			continue
+		}
 		plain, err := st.ExportPlain()
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
 				continue
 			}
 			return fmt.Errorf("export %s: %w", name, err)
+		}
+		if reusableCiphertext(filepath.Join(destDir, name), plain, key) {
+			continue
 		}
 		enc, err := encryptBytes(plain, key)
 		if err != nil {
@@ -221,6 +241,29 @@ func encryptStoresScoped(stores []SyncableStore, files []string, destDir string,
 	}
 
 	return nil
+}
+
+// reusableCiphertext reports whether the ciphertext at path decrypts under
+// key to exactly plain (canonical plaintext comparison). Only then may the
+// existing bytes stand in for a fresh encryption.
+func reusableCiphertext(path string, plain []byte, key []byte) bool {
+	enc, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	ref, err := decryptBytes(string(enc), key)
+	if err != nil {
+		return false
+	}
+	refHash, err := canonicalPlainHash(ref)
+	if err != nil {
+		return false
+	}
+	plainHash, err := canonicalPlainHash(plain)
+	if err != nil {
+		return false
+	}
+	return refHash == plainHash
 }
 
 // decryptStoresScoped decrypts exactly the given store blobs from srcDir

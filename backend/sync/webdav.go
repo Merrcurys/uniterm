@@ -84,7 +84,14 @@ func (b *WebDAVBackend) FetchAll(dir string) error {
 	} else if err != ErrWebDAVNotFound {
 		return err
 	}
-	for name := range info.FileHashes {
+	nullHash := nullStoreHash()
+	for name, h := range info.FileHashes {
+		if h == nullHash {
+			// A never-persisted store: the manifest records the null hash
+			// so aggregate hashes stay comparable, but the remote carries
+			// no blob for it.
+			continue
+		}
 		data, err := b.client.Get(name)
 		if err != nil {
 			return fmt.Errorf("fetch %s: %w", name, err)
@@ -99,12 +106,23 @@ func (b *WebDAVBackend) FetchAll(dir string) error {
 // StoreAll uploads ciphertext files from stagingDir (named by
 // manifest.FileHashes), the salt, then the manifest last.
 func (b *WebDAVBackend) StoreAll(stagingDir string, salt []byte, manifest SnapshotInfo) error {
-	for name := range manifest.FileHashes {
-		data, err := os.ReadFile(filepath.Join(stagingDir, name))
-		if err != nil {
-			return fmt.Errorf("stage %s: %w", name, err)
+	// Upload only the blobs actually staged: the caller stages the delta
+	// (the blobs whose plaintext changed), so the remote keeps its copy of
+	// every unchanged blob under the same key. The manifest still describes
+	// the whole snapshot.
+	entries, err := os.ReadDir(stagingDir)
+	if err != nil {
+		return fmt.Errorf("read staging: %w", err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || e.Name() == saltName {
+			continue
 		}
-		if err := b.client.Put(name, data); err != nil {
+		data, err := os.ReadFile(filepath.Join(stagingDir, e.Name()))
+		if err != nil {
+			return fmt.Errorf("stage %s: %w", e.Name(), err)
+		}
+		if err := b.client.Put(e.Name(), data); err != nil {
 			return err
 		}
 	}

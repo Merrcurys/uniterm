@@ -52,13 +52,24 @@ func (f *fakeSnapshotBackend) FetchAll(dir string) error {
 }
 
 func (f *fakeSnapshotBackend) StoreAll(stagingDir string, salt []byte, manifest SnapshotInfo) error {
-	f.store = map[string][]byte{}
-	for name := range manifest.FileHashes {
-		data, err := os.ReadFile(filepath.Join(stagingDir, name))
+	// Delta contract: staged blobs replace their remote copies, blobs not
+	// staged stay as they are — the real remote is not wiped either.
+	if f.store == nil {
+		f.store = map[string][]byte{}
+	}
+	entries, err := os.ReadDir(stagingDir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.IsDir() || e.Name() == saltName {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(stagingDir, e.Name()))
 		if err != nil {
 			return err
 		}
-		f.store[name] = data
+		f.store[e.Name()] = data
 	}
 	f.store[saltName] = salt
 	if f.raceAfterStore {
@@ -669,4 +680,74 @@ func (f *snapshotBlobStore) ExportPlain() ([]byte, error) {
 
 func (f *snapshotBlobStore) ImportPlain(plain []byte) error {
 	return os.WriteFile(filepath.Join(f.dir, f.name), plain, 0600)
+}
+
+// TestSyncSkipsNeverPersistedStore: a device that has only ever written two
+// of the scoped files must still publish a snapshot — the manifest records
+// the never-persisted stores with the null hash and carries no blob for them,
+// so neither StoreAll nor FetchAll may demand one. A second device with the
+// same content must then recognise the snapshot as identical.
+func TestSyncSkipsNeverPersistedStore(t *testing.T) {
+	s, dataDir, _ := newSnapshotTestService(t, nil)
+	writeConfig(t, dataDir, "connections.json", `{"v":1}`)
+	writeConfig(t, dataDir, "favorites.json", `["c1"]`)
+
+	b := newFakeSnapshotBackend()
+	if _, err := s.syncSnapshot(b); err != nil {
+		t.Fatalf("push with never-persisted stores: %v", err)
+	}
+	for _, name := range []string{"proxies.json", "tunnels.json", "identities.json"} {
+		if _, ok := b.store[name]; ok {
+			t.Errorf("never-persisted %s must not be uploaded", name)
+		}
+	}
+	if b.manifest.FileHashes["proxies.json"] == "" {
+		t.Error("the manifest must still record the null hash for hash comparison")
+	}
+
+	// Same content on a second device: the aggregate hashes agree, so the
+	// snapshot must be recognised rather than reported as a conflict.
+	s2, dataDir2, _ := newSnapshotTestService(t, nil)
+	writeConfig(t, dataDir2, "connections.json", `{"v":1}`)
+	writeConfig(t, dataDir2, "favorites.json", `["c1"]`)
+	res, err := s2.syncSnapshot(b)
+	if err != nil {
+		t.Fatalf("second device sync: %v", err)
+	}
+	if res.Direction == SyncConflict {
+		t.Fatal("identical content must not surface a conflict")
+	}
+}
+
+// TestPushSnapshotUploadsOnlyChangedBlobs pins the per-file granularity: the
+// per-blob encryption nonce is random, so re-encrypting unchanged content
+// yields different bytes — without the change-detection skip, a one-file edit
+// re-uploaded the whole config.
+func TestPushSnapshotUploadsOnlyChangedBlobs(t *testing.T) {
+	s, dataDir, _ := newSnapshotTestService(t, nil)
+	writeConfig(t, dataDir, "connections.json", `{"v":1}`)
+	writeConfig(t, dataDir, "favorites.json", `["c1"]`)
+
+	b := newFakeSnapshotBackend()
+	if _, err := s.syncSnapshot(b); err != nil {
+		t.Fatalf("initial push: %v", err)
+	}
+	oldFavorites := b.store["favorites.json"]
+
+	writeConfig(t, dataDir, "connections.json", `{"v":2}`)
+	if _, err := s.syncSnapshot(b); err != nil {
+		t.Fatalf("incremental push: %v", err)
+	}
+	if string(b.store["favorites.json"]) != string(oldFavorites) {
+		t.Fatal("unchanged blob was re-encrypted and re-uploaded")
+	}
+	if string(b.store["connections.json"]) == string(b.store["favorites.json"]) {
+		t.Fatal("changed blob must have been re-encrypted")
+	}
+
+	// The manifest still describes the whole scope, so a third device
+	// pulling gets every file.
+	if len(b.manifest.FileHashes) != len(defaultSyncedFiles) {
+		t.Fatalf("manifest hashes = %d entries, want %d", len(b.manifest.FileHashes), len(defaultSyncedFiles))
+	}
 }

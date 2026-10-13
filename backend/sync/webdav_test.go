@@ -118,9 +118,10 @@ func TestWebDAVBackendStoreAllFailureKeepsOldManifest(t *testing.T) {
 	}
 	storeSnapshot(t, b)
 
-	// Manifest references a file that is absent from stagingDir.
+	// The server starts rejecting uploads part-way through the delta.
+	f.rejectUpload("favorites.json")
 	staging := t.TempDir()
-	bad := SnapshotInfo{
+	next := SnapshotInfo{
 		Version:   "v2",
 		UpdatedAt: time.Now().UTC(),
 		FileHashes: map[string]string{
@@ -128,8 +129,13 @@ func TestWebDAVBackendStoreAllFailureKeepsOldManifest(t *testing.T) {
 			"favorites.json":   "ddd",
 		},
 	}
-	if err := b.StoreAll(staging, []byte("0123456789abcdef"), bad); err == nil {
-		t.Fatal("StoreAll with missing staging file must fail")
+	for name := range next.FileHashes {
+		if err := os.WriteFile(filepath.Join(staging, name), []byte("cipher-"+name), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := b.StoreAll(staging, []byte("0123456789abcdef"), next); err == nil {
+		t.Fatal("StoreAll must fail when an upload is rejected")
 	}
 	info, err := b.Head()
 	if err != nil {
@@ -171,14 +177,16 @@ func TestWebDAVBackendHeadCorruptManifest(t *testing.T) {
 
 // fakeDAV 是最小 WebDAV 服务器：内存 KV + PROPFIND/MKCOL 处理。
 type fakeDAV struct {
-	mu     sync.Mutex
-	files  map[string][]byte
-	dirs   map[string]bool
-	server *httptest.Server
+	mu      sync.Mutex
+	files   map[string][]byte
+	puts    map[string]int
+	failPut map[string]bool
+	dirs    map[string]bool
+	server  *httptest.Server
 }
 
 func newFakeDAV(t *testing.T) *fakeDAV {
-	f := &fakeDAV{files: map[string][]byte{}, dirs: map[string]bool{}}
+	f := &fakeDAV{files: map[string][]byte{}, puts: map[string]int{}, failPut: map[string]bool{}, dirs: map[string]bool{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
@@ -186,8 +194,13 @@ func newFakeDAV(t *testing.T) *fakeDAV {
 		path := strings.TrimPrefix(r.URL.Path, "/")
 		switch r.Method {
 		case "PUT":
+			if f.rejectsPUT(path) {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
 			body, _ := io.ReadAll(r.Body)
 			f.files[path] = body
+			f.puts[path]++
 			w.WriteHeader(http.StatusCreated)
 		case "GET":
 			data, ok := f.files[path]
@@ -220,6 +233,38 @@ func newFakeDAV(t *testing.T) *fakeDAV {
 	f.server = httptest.NewServer(mux)
 	t.Cleanup(f.server.Close)
 	return f
+}
+
+// rejectUpload makes the server reject uploads of a resource (test helper).
+// The name is matched against the request path's tail, so callers pass the
+// bare blob name.
+func (f *fakeDAV) rejectUpload(name string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.failPut[name] = true
+}
+
+func (f *fakeDAV) rejectsPUT(path string) bool {
+	for name := range f.failPut {
+		if path == name || strings.HasSuffix(path, "/"+name) {
+			return true
+		}
+	}
+	return false
+}
+
+// putCount reports how many times a resource was uploaded (test helper; same
+// mutex as the handlers).
+func (f *fakeDAV) putCount(name string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for path, count := range f.puts {
+		if path == name || strings.HasSuffix(path, "/"+name) {
+			n += count
+		}
+	}
+	return n
 }
 
 // delete removes a resource directly (test helper; same mutex as the handlers).
@@ -287,5 +332,89 @@ func TestWebDAVClientPathEscaping(t *testing.T) {
 		if string(got) != name {
 			t.Fatalf("get %q: got %q", name, got)
 		}
+	}
+}
+
+// TestWebDAVBackendStoreAllUploadsStagedOnly pins the delta contract: a
+// snapshot upload carries the blobs present in the staging dir, and leaves
+// every other remote blob untouched — the random per-blob nonce would
+// otherwise make a one-file change re-upload the whole config.
+func TestWebDAVBackendStoreAllUploadsStagedOnly(t *testing.T) {
+	f := newFakeDAV(t)
+	b := NewWebDAVBackend(f.server.URL, "sync", "u", "p", nil)
+	if err := b.Probe(); err != nil {
+		t.Fatal(err)
+	}
+
+	salt := []byte("0123456789abcdef")
+	staging := t.TempDir()
+	manifest := SnapshotInfo{Version: "v1", FileHashes: map[string]string{
+		"connections.json": "aaa",
+		"favorites.json":   "bbb",
+	}}
+	for name := range manifest.FileHashes {
+		if err := os.WriteFile(filepath.Join(staging, name), []byte("cipher-"+name), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := b.StoreAll(staging, salt, manifest); err != nil {
+		t.Fatal(err)
+	}
+
+	// Second snapshot: connections.json changed, favorites.json unchanged
+	// and therefore not staged — the remote must keep its copy.
+	staging2 := t.TempDir()
+	manifest2 := SnapshotInfo{Version: "v2", FileHashes: manifest.FileHashes}
+	if err := os.WriteFile(filepath.Join(staging2, "connections.json"), []byte("cipher-2"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.StoreAll(staging2, salt, manifest2); err != nil {
+		t.Fatalf("delta store: %v", err)
+	}
+	if got := f.putCount("connections.json"); got != 2 {
+		t.Fatalf("changed blob PUT count = %d, want 2", got)
+	}
+	if got := f.putCount("favorites.json"); got != 1 {
+		t.Fatalf("unchanged blob was re-uploaded: %d PUTs", got)
+	}
+
+	mirror := t.TempDir()
+	if err := b.FetchAll(mirror); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(mirror, "favorites.json"))
+	if err != nil || string(data) != "cipher-favorites.json" {
+		t.Fatalf("unchanged blob lost from the remote: %q err=%v", data, err)
+	}
+}
+
+// TestWebDAVBackendFetchAllSkipsNullEntries: a manifest records a
+// never-persisted store with the null hash and the remote carries no blob for
+// it — fetching must skip the entry, not fail on a 404.
+func TestWebDAVBackendFetchAllSkipsNullEntries(t *testing.T) {
+	f := newFakeDAV(t)
+	b := NewWebDAVBackend(f.server.URL, "sync", "u", "p", nil)
+	if err := b.Probe(); err != nil {
+		t.Fatal(err)
+	}
+
+	staging := t.TempDir()
+	manifest := SnapshotInfo{Version: "v1", FileHashes: map[string]string{
+		"connections.json": "aaa",
+		"proxies.json":     nullStoreHash(),
+	}}
+	if err := os.WriteFile(filepath.Join(staging, "connections.json"), []byte("cipher-conn"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.StoreAll(staging, []byte("0123456789abcdef"), manifest); err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	mirror := t.TempDir()
+	if err := b.FetchAll(mirror); err != nil {
+		t.Fatalf("fetch with a null-hash entry must skip it: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(mirror, "proxies.json")); !os.IsNotExist(err) {
+		t.Fatal("a null entry must not materialise a blob")
 	}
 }

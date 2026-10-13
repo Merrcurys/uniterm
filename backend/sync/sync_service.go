@@ -528,7 +528,7 @@ func (s *SyncService) maybeCompactHistory() {
 // top of the current HEAD and pushes.
 func (s *SyncService) pushLocalConfig(repo *GitRepo, encKey []byte, username, token string) (*SyncResult, error) {
 	files := s.effectiveFiles()
-	if err := encryptStoresScoped(s.stores, files, s.repoPath, encKey); err != nil {
+	if err := encryptStoresScoped(s.stores, files, s.repoPath, encKey, nil); err != nil {
 		s.updateLastSyncResult("failed", fmt.Sprintf("encrypt files: %v", err))
 		return nil, fmt.Errorf("encrypt files: %w", err)
 	}
@@ -668,7 +668,7 @@ func (s *SyncService) ResolveConflict(useLocal bool) (*SyncResult, error) {
 				return nil, fmt.Errorf("reset: %w", err)
 			}
 		}
-		if err := encryptStoresScoped(s.stores, files, s.repoPath, encKey); err != nil {
+		if err := encryptStoresScoped(s.stores, files, s.repoPath, encKey, nil); err != nil {
 			return nil, fmt.Errorf("encrypt files: %w", err)
 		}
 		if _, err := repo.StageAndCommitFiles(commitMsg("uniTerm config sync (resolve conflict)"), files); err != nil {
@@ -883,7 +883,7 @@ func (s *SyncService) ConfigureRepo(repoURL, username, token, masterPassword str
 	}
 
 	// Encrypt and push local config
-	if err := encryptStoresScoped(s.stores, files, s.repoPath, encKey); err != nil {
+	if err := encryptStoresScoped(s.stores, files, s.repoPath, encKey, nil); err != nil {
 		return nil, fmt.Errorf("encrypt files: %w", err)
 	}
 

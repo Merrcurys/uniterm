@@ -42,7 +42,7 @@ func (s *SyncService) syncSnapshot(b SnapshotBackend) (*SyncResult, error) {
 	// Empty remote: publish local (bootstrap, or remote was wiped).
 	// No fetch needed.
 	if manifest == nil {
-		return s.pushSnapshot(b, files, encKey, "")
+		return s.pushSnapshot(b, files, encKey, "", nil)
 	}
 
 	// Hash first: the fast paths below must not download anything.
@@ -97,7 +97,7 @@ func (s *SyncService) syncSnapshot(b SnapshotBackend) (*SyncResult, error) {
 
 	case last != "" && remoteHash == last && localHash != last:
 		// Only local changed → push.
-		return s.pushSnapshot(b, files, encKey, stagingDir)
+		return s.pushSnapshot(b, files, encKey, stagingDir, manifest.FileHashes)
 
 	default:
 		// Both changed (or first join with local data) → conflict dialog.
@@ -141,12 +141,27 @@ func (s *SyncService) pullSnapshot(files []string, stagingDir string, encKey []b
 // uploads it as a new remote snapshot. fetchedDir is the already-fetched
 // remote staging dir ("" on bootstrap, where no fetch happened) — its
 // .sync-salt is reused so the repo keeps one salt identity across pushes.
-// Callers must hold s.mu.
-func (s *SyncService) pushSnapshot(b SnapshotBackend, files []string, encKey []byte, fetchedDir string) (*SyncResult, error) {
+// refHashes are the remote snapshot's per-file plaintext hashes (nil on a
+// fresh remote): blobs whose hash matches the local export are not staged,
+// so the upload only carries files whose content actually changed. Callers
+// must hold s.mu.
+func (s *SyncService) pushSnapshot(b SnapshotBackend, files []string, encKey []byte, fetchedDir string, refHashes map[string]string) (*SyncResult, error) {
 	hashes, agg, err := hashStoresScoped(s.stores, files)
 	if err != nil {
 		s.updateLastSyncResult("failed", err.Error())
 		return nil, err
+	}
+
+	// Diff on the canonical plaintext hashes: only blobs whose content the
+	// remote does not already carry are staged for upload.
+	var skip map[string]bool
+	if refHashes != nil {
+		skip = make(map[string]bool, len(files))
+		for _, name := range files {
+			if refHashes[name] == hashes[name] {
+				skip[name] = true
+			}
+		}
 	}
 
 	// Salt: reuse the remote's (same repo identity across pushes — read
@@ -171,7 +186,7 @@ func (s *SyncService) pushSnapshot(b SnapshotBackend, files []string, encKey []b
 		s.updateLastSyncResult("failed", fmt.Sprintf("create staging: %v", err))
 		return nil, fmt.Errorf("create staging: %w", err)
 	}
-	if err := encryptStoresScoped(s.stores, files, s.repoPath, encKey); err != nil {
+	if err := encryptStoresScoped(s.stores, files, s.repoPath, encKey, skip); err != nil {
 		s.updateLastSyncResult("failed", fmt.Sprintf("encrypt files: %v", err))
 		return nil, fmt.Errorf("encrypt files: %w", err)
 	}
@@ -269,7 +284,7 @@ func (s *SyncService) resolveConflictSnapshot(b SnapshotBackend, useLocal bool) 
 	if manifest == nil {
 		// Remote wiped between the conflict and the resolve: the only
 		// content left is local — bootstrap push.
-		return s.pushSnapshot(b, files, encKey, "")
+		return s.pushSnapshot(b, files, encKey, "", nil)
 	}
 
 	// Fetch the remote snapshot into the shared staging dir: pushSnapshot
@@ -283,7 +298,7 @@ func (s *SyncService) resolveConflictSnapshot(b SnapshotBackend, useLocal bool) 
 	}
 
 	if useLocal {
-		return s.pushSnapshot(b, files, encKey, s.repoPath)
+		return s.pushSnapshot(b, files, encKey, s.repoPath, manifest.FileHashes)
 	}
 	return s.pullSnapshot(files, s.repoPath, encKey, aggregateHash(manifest.FileHashes))
 }
@@ -465,7 +480,7 @@ func (s *SyncService) ConfigureRepoWebDAV(serverURL, basePath, username, passwor
 	if err := WriteSaltFile(s.repoPath, salt); err != nil {
 		return nil, fmt.Errorf("write salt: %w", err)
 	}
-	if _, err := s.pushSnapshot(backend, files, encKey, s.repoPath); err != nil {
+	if _, err := s.pushSnapshot(backend, files, encKey, s.repoPath, nil); err != nil {
 		return nil, err
 	}
 	return &SyncResult{Direction: SyncPush, Message: "仓库配置成功"}, nil

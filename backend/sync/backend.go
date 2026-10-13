@@ -113,10 +113,7 @@ func requireStores(stores []SyncableStore, files []string) error {
 // missing file hashes as null — the sentinel hashStoresScoped records for a
 // store whose blob was never written.
 func canonicalDirHashes(files []string, dir string) (map[string]string, string, error) {
-	nullHash, err := canonicalPlainHash([]byte("null"))
-	if err != nil {
-		return nil, "", err
-	}
+	nullHash := nullStoreHash()
 	hashes := make(map[string]string, len(files))
 	for _, name := range files {
 		plain, err := os.ReadFile(filepath.Join(dir, name))
@@ -218,4 +215,16 @@ func canonicalPlainHash(plain []byte) (string, error) {
 	}
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:]), nil
+}
+
+// nullStoreHash is the manifest hash of a store whose blob was never
+// written: its export reads as "no data", and the entry exists only so the
+// aggregate hash stays comparable across devices that do carry the blob.
+func nullStoreHash() string {
+	h, err := canonicalPlainHash([]byte("null"))
+	if err != nil {
+		// Unreachable: "null" is valid JSON.
+		return ""
+	}
+	return h
 }

@@ -1026,3 +1026,67 @@ func TestChangePassword_RewritesSaltAndReencryptsFiles(t *testing.T) {
 		}
 	}
 }
+
+// TestSyncCommitOnlyCarriesChangedFiles pins the per-file sync granularity in
+// git mode: after a one-file change the blobs whose content did not change
+// keep their previous bytes in the new commit. The per-blob encryption nonce
+// is random, so without the change-detection skip every push rewrote every
+// file and the repo grew by the whole config on every sync.
+func TestSyncCommitOnlyCarriesChangedFiles(t *testing.T) {
+	s, key := newFlowService(t)
+
+	writeConnections(t, s.dataDir, "c1")
+	writeSyncFile(t, s.dataDir, "favorites.json", `["c1"]`)
+	if _, err := s.Sync(); err != nil {
+		t.Fatalf("initial sync: %v", err)
+	}
+	repoO, err := git.PlainOpen(s.repoPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := &GitRepo{repo: repoO, repoPath: s.repoPath}
+
+	headFiles := func(hash plumbing.Hash) map[string]string {
+		t.Helper()
+		dir := t.TempDir()
+		if err := g.ExtractCommitFilesIn(hash, defaultSyncedFiles, dir); err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]string{}
+		for _, name := range defaultSyncedFiles {
+			data, err := os.ReadFile(filepath.Join(dir, name))
+			if err != nil {
+				continue // blob not carried by that commit
+			}
+			plain, err := decryptBytes(string(data), key)
+			if err != nil {
+				t.Fatalf("decrypt %s: %v", name, err)
+			}
+			out[name] = string(plain)
+		}
+		return out
+	}
+
+	heads, err := g.ResolveBranchHeads("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := headFiles(*heads.Local)
+
+	writeConnections(t, s.dataDir, "c2")
+	if _, err := s.Sync(); err != nil {
+		t.Fatalf("second sync: %v", err)
+	}
+	heads, err = g.ResolveBranchHeads("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := headFiles(*heads.Local)
+
+	if after["connections.json"] == before["connections.json"] {
+		t.Fatal("the changed file must have been re-published")
+	}
+	if after["favorites.json"] != before["favorites.json"] {
+		t.Fatal("unchanged blob was rewritten in the new commit")
+	}
+}
