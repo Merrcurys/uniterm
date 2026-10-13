@@ -55,6 +55,34 @@ var SecretFiles = []SecretFile{
 	{File: "settings.json", Paths: []string{"ai.models.*.apiKey"}},
 }
 
+// ClearAllSecretFields blanks every manifest-declared secret field in the
+// data dir's config files WITHOUT decrypting: the credential reset runs while
+// the credential store is already torn down, when decrypt-then-save would
+// fail on the very fields being cleared. Missing or corrupt files are left
+// untouched (a corrupt file carries no readable ciphertext and is the store's
+// business on next load); non-secret fields are preserved byte-for-value.
+func ClearAllSecretFields(dataDir string) {
+	for _, sf := range SecretFiles {
+		path := filepath.Join(dataDir, sf.File)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var obj map[string]interface{}
+		if err := json.Unmarshal(data, &obj); err != nil {
+			continue
+		}
+		if err := ClearSecretFields(sf.File, obj); err != nil {
+			continue
+		}
+		out, err := json.MarshalIndent(obj, "", "  ")
+		if err != nil {
+			continue
+		}
+		_ = os.WriteFile(path, out, 0600)
+	}
+}
+
 // SecretFileByName returns the manifest entry for file, or nil when the file
 // carries no secret fields.
 func SecretFileByName(file string) *SecretFile {

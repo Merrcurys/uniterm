@@ -416,6 +416,13 @@ func (a *App) initStores(dataDir string, upgrade bool) {
 // normal path.
 func (a *App) initCredentials(dataDir string, upgrade bool) {
 	cred := credentials.New(dataDir, sync.NewKeychain())
+	// The reset/setup ciphertext guards scan the data dir; the declaring
+	// manifest lives in the store package.
+	secretFiles := make([]string, 0, len(store.SecretFiles))
+	for _, sf := range store.SecretFiles {
+		secretFiles = append(secretFiles, sf.File)
+	}
+	cred.SetSecretFiles(secretFiles)
 
 	if upgrade {
 		// Only this once (the upgrade migration) is worth logging; ordinary
@@ -2384,15 +2391,15 @@ func dataDirContains(dir, sub string) bool {
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-// clearEncryptedFields rewrites connections.json and settings.json with empty
-// secret fields WITHOUT decrypting. It must work while the credential store is
-// locked (keychain-lost / reset), when Load()/Save() would fail because they
-// require the master key to decrypt the very fields we are clearing.
+// clearEncryptedFields blanks every manifest-declared secret field WITHOUT
+// decrypting. It must work while the credential store is gone (reset), when
+// Load()/Save() would fail because they require the master key to decrypt the
+// very fields being cleared. The field list is the store's secret-field
+// manifest — the same one encryption and the setup guard derive from; the
+// hand-written list this used to be missed key content and ai.json, leaving
+// ciphertext behind that wedged the next Setup.
 func (a *App) clearEncryptedFields() {
-	clearSecretsInFile(filepath.Join(a.dataDir, "connections.json"), "connections")
-	clearSecretsInFile(filepath.Join(a.dataDir, "settings.json"), "settings")
-	clearSecretsInFile(filepath.Join(a.dataDir, "identities.json"), "identities")
-	clearSecretsInFile(filepath.Join(a.dataDir, "proxies.json"), "proxies")
+	store.ClearAllSecretFields(a.dataDir)
 }
 
 // clearSecretsInFile blanks the secret fields (connections[].password or

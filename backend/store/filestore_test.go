@@ -1,9 +1,13 @@
 package store
 
 import (
+	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -254,5 +258,66 @@ func TestSyncableBlobNames(t *testing.T) {
 		if !strings.HasSuffix(s.BlobName(), ".json") {
 			t.Errorf("BlobName %q must be a .json blob", s.BlobName())
 		}
+	}
+}
+
+// TestClearSecretFieldsBlanksEveryManifestField is the reset-path guard: the
+// credential reset blanks secret fields WITHOUT decrypting (the vault is gone
+// by then), and it must cover every manifest-declared field of every
+// manifest-declared file — a missed field leaves ciphertext behind and wedges
+// the next Setup, which refuses a data dir that still carries it.
+func TestClearSecretFieldsBlanksEveryManifestField(t *testing.T) {
+	dir := t.TempDir()
+	seed := map[string]string{
+		"connections.json": `{"name":"keepme","connections":[{"id":"c1","password":"enc:v1:aaa","keyContent":"enc:v1:bbb"},{"id":"c2","password":"enc:v1:ccc","keyContent":"enc:v1:ddd"}]}`,
+		"identities.json":  `{"identities":[{"id":"i1","password":"enc:v1:eee","keyContent":"enc:v1:fff"}]}`,
+		"proxies.json":     `{"proxies":[{"id":"p1","pass":"enc:v1:ggg"}]}`,
+		"ai.json":          `{"models":[{"id":"m1","apiKey":"enc:v1:hhh"}]}`,
+		"settings.json":    `{"theme":"dark","ai":{"models":[{"id":"m2","apiKey":"enc:v1:iii"}]}}`,
+	}
+	for name, body := range seed {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ClearAllSecretFields(dir)
+
+	for name := range seed {
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(data, []byte("enc:v1:")) {
+			t.Errorf("%s still carries ciphertext after clear: %s", name, data)
+		}
+	}
+	// Non-secret fields must survive untouched.
+	raw, err := os.ReadFile(filepath.Join(dir, "connections.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var conn struct {
+		Name        string `json:"name"`
+		Connections []struct {
+			ID       string `json:"id"`
+			Password string `json:"password"`
+		} `json:"connections"`
+	}
+	if err := json.Unmarshal(raw, &conn); err != nil {
+		t.Fatal(err)
+	}
+	if conn.Name != "keepme" || len(conn.Connections) != 2 || conn.Connections[0].Password != "" {
+		t.Fatalf("unexpected cleared connections.json: %s", raw)
+	}
+	raw, _ = os.ReadFile(filepath.Join(dir, "settings.json"))
+	var settings struct {
+		Theme string `json:"theme"`
+	}
+	if err := json.Unmarshal(raw, &settings); err != nil {
+		t.Fatal(err)
+	}
+	if settings.Theme != "dark" {
+		t.Fatalf("non-secret settings field lost: %s", raw)
 	}
 }

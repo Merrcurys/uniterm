@@ -8,6 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/ys-ll/uniterm/backend/credentials"
+	"github.com/ys-ll/uniterm/backend/store"
 	"sync"
 	"testing"
 	"time"
@@ -296,3 +299,53 @@ func TestSetDataDir_RejectsDirInsideCurrent(t *testing.T) {
 		t.Fatalf("current data dir must be untouched: %v", err)
 	}
 }
+
+// TestResetCredentialsAllowsFreshSetup is the reset-wedge regression: after a
+// reset, no in-place ciphertext may remain in any manifest-declared file —
+// Setup refuses a data dir that still carries it, which used to leave the
+// user unable to configure a new master password (the old hand-written clear
+// list missed key content and ai.json).
+func TestResetCredentialsAllowsFreshSetup(t *testing.T) {
+	dir := t.TempDir()
+	seed := map[string]string{
+		"connections.json": `{"connections":[{"id":"c1","password":"enc:v1:a","keyContent":"enc:v1:b"}]}`,
+		"identities.json":  `{"identities":[{"id":"i1","password":"enc:v1:c","keyContent":"enc:v1:d"}]}`,
+		"proxies.json":     `{"proxies":[{"id":"p1","pass":"enc:v1:e"}]}`,
+		"ai.json":          `{"models":[{"id":"m1","apiKey":"enc:v1:f"}]}`,
+		"settings.json":    `{"ai":{"models":[{"id":"m2","apiKey":"enc:v1:g"}]}}`,
+	}
+	for name, body := range seed {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	files := make([]string, 0, len(store.SecretFiles))
+	for _, sf := range store.SecretFiles {
+		files = append(files, sf.File)
+	}
+	cs := credentials.New(dir, memKeychain{entries: map[string]string{}})
+	cs.SetSecretFiles(files)
+	a := &App{dataDir: dir, credentialStore: cs}
+
+	if err := a.ResetCredentials(); err != nil {
+		t.Fatalf("reset: %v", err)
+	}
+	if err := cs.Setup(credentials.ModeMasterPassword, "new-pw"); err != nil {
+		t.Fatalf("setup after reset must succeed: %v", err)
+	}
+}
+
+// memKeychain is an in-memory credentials.Keychain for tests that must not
+// touch the OS keyring.
+type memKeychain struct{ entries map[string]string }
+
+func (k memKeychain) Get(key string) (string, error) {
+	v, ok := k.entries[key]
+	if !ok {
+		return "", errors.New("not found")
+	}
+	return v, nil
+}
+func (k memKeychain) Set(key, val string) error { k.entries[key] = val; return nil }
+func (k memKeychain) Delete(key string) error   { delete(k.entries, key); return nil }

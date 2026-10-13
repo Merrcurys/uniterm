@@ -34,6 +34,9 @@ type Status struct {
 // in the OS keychain; master-password mode derives the key from a password and
 // caches the derived key in the keychain for auto-unlock.
 type Store struct {
+	// secretFiles is the wired list of config files that may carry in-place
+	// ciphertext (see SetSecretFiles). Read under mu.
+	secretFiles []string
 	dataDir  string
 	keychain Keychain
 	mu       stdsync.Mutex
@@ -264,11 +267,25 @@ func (s *Store) getKey(name string) ([]byte, error) {
 	return b, nil
 }
 
-// storeHasSecrets reports whether any config file in the data dir already
-// contains in-place enc:v1 ciphertext. A bare Setup on such a dir would
-// orphan the existing ciphertext, so it must be guarded.
+// SetSecretFiles wires the config files that may carry in-place enc:v1
+// ciphertext. The list is the store manifest's file set, injected by the app:
+// the manifest lives in the store package, which cannot be imported from here
+// (store → credentials). Unwired stores report no ciphertext, so production
+// wiring is mandatory.
+func (s *Store) SetSecretFiles(files []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.secretFiles = append([]string{}, files...)
+}
+
+// storeHasSecrets reports whether any wired config file in the data dir
+// already contains in-place enc:v1 ciphertext. A bare Setup on such a dir
+// would orphan the existing ciphertext, so it must be guarded.
 func (s *Store) storeHasSecrets() bool {
-	for _, name := range []string{"connections.json", "settings.json", "identities.json", "proxies.json"} {
+	s.mu.Lock()
+	files := s.secretFiles
+	s.mu.Unlock()
+	for _, name := range files {
 		data, err := os.ReadFile(filepath.Join(s.dataDir, name))
 		if err != nil {
 			continue

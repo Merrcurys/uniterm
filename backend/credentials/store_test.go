@@ -2,6 +2,8 @@ package credentials
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 )
@@ -37,9 +39,11 @@ func (f *fakeKeychain) Delete(key string) error {
 // temporarily denied macOS keychain permission.
 type transientKeychain struct{}
 
-func (transientKeychain) Get(string) (string, error)  { return "", errors.New("keychain temporarily unavailable") }
-func (transientKeychain) Set(string, string) error    { return nil }
-func (transientKeychain) Delete(string) error         { return nil }
+func (transientKeychain) Get(string) (string, error) {
+	return "", errors.New("keychain temporarily unavailable")
+}
+func (transientKeychain) Set(string, string) error { return nil }
+func (transientKeychain) Delete(string) error      { return nil }
 
 func TestSetupKeychainMode(t *testing.T) {
 	dir := t.TempDir()
@@ -125,5 +129,31 @@ func TestEncryptWhenLockedFails(t *testing.T) {
 	_ = s2.AutoUnlock() // locked
 	if _, err := s2.Encrypt("x"); err == nil {
 		t.Fatalf("Encrypt should fail when locked")
+	}
+}
+
+// TestStoreHasSecretsUsesWiredFileList: the file list that may carry in-place
+// ciphertext is wired by the app from the store's secret-field manifest (it
+// cannot be declared here — store imports credentials). An unwired store
+// reports nothing.
+func TestStoreHasSecretsUsesWiredFileList(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "connections.json"),
+		[]byte(`{"connections":[{"password":"enc:v1:x"}]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ai.json"),
+		[]byte(`{"models":[{"apiKey":"enc:v1:y"}]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	s := New(dir, newFakeKeychain())
+	if s.storeHasSecrets() {
+		t.Fatal("an unwired store must not scan for ciphertext")
+	}
+
+	s.SetSecretFiles([]string{"connections.json", "ai.json"})
+	if !s.storeHasSecrets() {
+		t.Fatal("ciphertext in a wired file must be detected")
 	}
 }
