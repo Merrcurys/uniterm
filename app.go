@@ -2119,6 +2119,12 @@ func (a *App) SetDataDir(kind, customDir string, migrate bool) error {
 	if err != nil {
 		return err
 	}
+	// Migrating onto the current data dir (or into a directory inside it)
+	// would copyDir the dir onto itself and then removeDataDir the only
+	// copy. Refuse before anything is touched.
+	if a.dataDir != "" && dataDirContains(a.dataDir, target) {
+		return fmt.Errorf("the chosen directory is the current data dir (or inside it): %s", target)
+	}
 	if !isWritable(target) {
 		return fmt.Errorf("directory not writable: %s", target)
 	}
@@ -2346,6 +2352,25 @@ func (a *App) reencryptAll(cs *credentials.Store, oldKey, newKey []byte) error {
 		return err
 	}
 	return nil
+}
+
+// dataDirContains reports whether sub denotes the same directory as dir or
+// lies inside it. The comparison is lexical after Clean — the migration guard
+// runs before the target necessarily exists, so there is no filesystem
+// round-trip to resolve symlinks through; Windows paths are case-insensitive.
+func dataDirContains(dir, sub string) bool {
+	dir, sub = filepath.Clean(dir), filepath.Clean(sub)
+	if goruntime.GOOS == "windows" {
+		dir, sub = strings.ToLower(dir), strings.ToLower(sub)
+	}
+	if dir == sub {
+		return true
+	}
+	rel, err := filepath.Rel(dir, sub)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // clearEncryptedFields rewrites connections.json and settings.json with empty

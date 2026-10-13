@@ -5,12 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 )
-
 
 // TestApp_StartupError_CapturesSingleError verifies that a single error
 // sent during startup() surfaces through StartupError() after
@@ -253,5 +254,45 @@ func TestApp_ConcurrentCancelSurvives(t *testing.T) {
 	}
 	if c != &myB {
 		t.Errorf("chatCancel points at %p, want B's cancel at %p", c, &myB)
+	}
+}
+
+// TestSetDataDir_RejectsSameDir guards the migration self-copy: choosing the
+// directory the app already runs from must be refused before anything is
+// copied or removed — copyDir onto itself followed by removeDataDir would
+// delete the only copy of the data.
+func TestSetDataDir_RejectsSameDir(t *testing.T) {
+	dir := t.TempDir()
+	seed := filepath.Join(dir, "connections.json")
+	if err := os.WriteFile(seed, []byte(`{}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	a := &App{dataDir: dir}
+	if err := a.SetDataDir("custom", dir, true); err == nil {
+		t.Fatal("migrating onto the current data dir must be rejected")
+	}
+	if _, err := os.Stat(seed); err != nil {
+		t.Fatalf("current data dir must be untouched: %v", err)
+	}
+}
+
+// TestSetDataDir_RejectsDirInsideCurrent: a target inside the current data
+// dir is walked by copyDir while it is being written and then removed by
+// removeDataDir together with the source — data loss either way.
+func TestSetDataDir_RejectsDirInsideCurrent(t *testing.T) {
+	parent := t.TempDir()
+	seed := filepath.Join(parent, "connections.json")
+	if err := os.WriteFile(seed, []byte(`{}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	inside := filepath.Join(parent, "inside")
+
+	a := &App{dataDir: parent}
+	if err := a.SetDataDir("custom", inside, true); err == nil {
+		t.Fatal("migrating into the current data dir must be rejected")
+	}
+	if _, err := os.Stat(seed); err != nil {
+		t.Fatalf("current data dir must be untouched: %v", err)
 	}
 }
