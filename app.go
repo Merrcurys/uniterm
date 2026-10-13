@@ -2019,6 +2019,13 @@ func (a *App) RelaunchApp() {
 	a.app.Quit()
 }
 
+// QuitApp exits the application. The unlock dialog offers it so a user who
+// wants neither to unlock nor to clear credentials is never forced into
+// either choice.
+func (a *App) QuitApp() {
+	a.app.Quit()
+}
+
 func (a *App) CheckForUpdate(source string) (*update.UpdateInfo, error) {
 	return update.Check(Version, source)
 }

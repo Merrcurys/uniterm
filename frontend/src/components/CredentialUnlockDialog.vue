@@ -11,8 +11,9 @@
     <el-input v-model="pw" type="password" show-password :placeholder="t('unlock.password')" @keyup.enter="onUnlock" />
     <div v-if="errorMsg" class="form-error">{{ errorMsg }}</div>
     <template #footer>
-      <el-button type="primary" :loading="submitting" @click="onUnlock">{{ t('unlock.confirm') }}</el-button>
+      <el-button @click="onQuit">{{ t('unlock.quit') }}</el-button>
       <el-button @click="onReset">{{ t('unlock.reset') }}</el-button>
+      <el-button type="primary" :loading="submitting" @click="onUnlock">{{ t('unlock.confirm') }}</el-button>
     </template>
   </el-dialog>
 </template>
@@ -20,6 +21,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useI18n } from '../i18n'
+import { QuitApp } from '../../bindings/github.com/ys-ll/uniterm/app'
 import { useCredentialStore } from '../stores/credentialStore'
 
 defineProps<{ visible: boolean }>()
@@ -45,6 +47,14 @@ async function onUnlock() {
   }
 }
 function onReset() { emit('reset') }
+async function onQuit() {
+  submitting.value = true
+  try {
+    await QuitApp()
+  } finally {
+    submitting.value = false
+  }
+}
 function onCancel() { emit('update:visible', false) }
 </script>
 
