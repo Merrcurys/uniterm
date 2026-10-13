@@ -300,6 +300,7 @@ Thanks to the following people for contributing code and improvements, and to ev
 - [@IBRAHIMELAMRABET](https://github.com/IBRAHIMELAMRABET)
 - [@chris-edstrom](https://github.com/chris-edstrom)
 - [@andreafunicelli](https://github.com/andreafunicelli)
+- [@dungvv](https://github.com/dungvv)
 
 ## License
 
