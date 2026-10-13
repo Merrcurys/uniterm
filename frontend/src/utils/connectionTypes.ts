@@ -92,7 +92,7 @@ export const CONNECTION_TYPES: ConnectionTypeInfo[] = [
   // not created in the form, and carry no default port.
   { type: 'monitor', label: 'Monitor', icon: Activity, category: 'other', connectMenuKey: 'sidebar.connectMonitor', formHidden: true },
   // Pure UI tab kinds — no connection session behind them, icon/label only.
-  { type: 'workspace', label: 'Workspace', icon: LayoutDashboard, category: 'other', formHidden: true },
+  { type: 'workspace', label: 'Workspace', icon: LayoutDashboard, category: 'other', formHidden: true, connectMenuKey: 'workspace.openSaved' },
   { type: 'settings', label: 'Settings', icon: Settings, category: 'other', formHidden: true },
   { type: 'start', label: 'Start', icon: SquarePlus, category: 'other', formHidden: true },
 ]
