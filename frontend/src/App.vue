@@ -10,6 +10,7 @@
       @close-tab-batch="closeTabBatch"
       @toggle-ai-lock="onToggleAiLock"
       @tab-dragstart="onTabDragStart"
+      @new-local-terminal="createNewTab"
     />
     <div class="main-content">
       <Sidebar ref="sidebarRef" :visible="sidebarVisible" @toggle="sidebarVisible = !sidebarVisible" @connect="onSidebarConnect" @connect-to-workspace="({ config, workspaceId }: any) => onConnect(config, undefined, undefined, true, workspaceId)" @create-workspace="(configs: any) => onCreateWorkspaceFromConfigs(configs)" @connect-only="onConnectOnly" />
@@ -1113,11 +1114,28 @@ function navigatePanel(dir: number) {
   tabStore.setActivePanel(t.id, next)
 }
 
+// What the tab bar "+" button (relayed from TabsList) and the newConnection
+// shortcut open (issue #1043): the start page by default, or a local terminal
+// with the default shell when newTabAction says so. No shell available ->
+// fall back to the start page.
+function createNewTab() {
+  if (settingsStore.settings.newTabAction === 'localTerminal') {
+    const shells = settingsStore.availableShells
+    const preferred = settingsStore.settings.defaultLocalShell
+    const shell = preferred && shells.includes(preferred) ? preferred : shells[0]
+    if (shell) {
+      createLocalTerminalWithShell(shell)
+      return
+    }
+  }
+  tabStore.createStartTab()
+}
+
 // ── Keyboard shortcut handlers (module-level so watch can access them) ──
 const actionHandlers: Record<ShortcutAction, () => void> = {
   nextTab: () => tabStore.nextTab(),
   prevTab: () => tabStore.prevTab(),
-  newConnection: () => { tabStore.createStartTab() },
+  newConnection: () => { createNewTab() },
   toggleSidebar: () => {
     if (sidebarVisible.value) {
       sidebarVisible.value = false
