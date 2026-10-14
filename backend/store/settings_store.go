@@ -209,6 +209,10 @@ type AppSettings struct {
 	// menu: "button" (hover buttons) or "rightclick". Empty means the
 	// frontend falls back to `button`.
 	HostListMenuStyle string `json:"hostListMenuStyle,omitempty"`
+	// NewTabAction selects what the tab bar's "+" button (and the
+	// newConnection shortcut) opens: "startPage" or "localTerminal".
+	// Empty means the frontend falls back to "startPage".
+	NewTabAction string `json:"newTabAction,omitempty"`
 	// SidebarTabs toggles which connection-sidebar tab icons are visible,
 	// keyed by view id (connections/files/monitor/tunnels/quickCommands/
 	// history/personalization). "connections" is always shown in the UI and

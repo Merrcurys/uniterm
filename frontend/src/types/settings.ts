@@ -295,6 +295,10 @@ export interface AppSettings {
   // ("button") or right-click only, with the hover buttons hidden
   // ("rightclick"). The right-click menu works in both modes.
   hostListMenuStyle: 'button' | 'rightclick'
+  // What the tab bar's "+" button (and the newConnection shortcut) opens:
+  // the start page ("startPage", default) or a local terminal with the
+  // default shell ("localTerminal").
+  newTabAction: 'startPage' | 'localTerminal'
   // Which connection-sidebar tab icons are visible, keyed by view id.
   // Missing keys fall back to SIDEBAR_TAB_DEFAULTS.
   sidebarTabs: Record<string, boolean>
@@ -389,6 +393,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   tabCloseButton: 'left',
   showTabShortcutHints: true,
   hostListMenuStyle: 'button',
+  newTabAction: 'startPage',
   sidebarTabs: { ...SIDEBAR_TAB_DEFAULTS }
 }
 
