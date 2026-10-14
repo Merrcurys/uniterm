@@ -74,3 +74,11 @@ func keychainDelete(service, key string) error {
 	// go-keyring returns ErrNotFound); all callers tolerate either.
 	return application.Android.SecureDelete(key)
 }
+
+// keychainList is unsupported on Android: the wails bridge exposes only
+// get/set/delete on the encrypted prefs, with no enumeration. The data dir
+// lives in the app sandbox and cannot be copied elsewhere, so credential
+// recovery has no scenario here anyway.
+func keychainList(string) ([]string, error) {
+	return nil, errors.New("keychain enumeration not supported on this platform")
+}

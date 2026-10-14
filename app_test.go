@@ -10,7 +10,9 @@ import (
 	"strings"
 
 	"github.com/ys-ll/uniterm/backend/credentials"
+	"github.com/ys-ll/uniterm/backend/session"
 	"github.com/ys-ll/uniterm/backend/store"
+	unitsync "github.com/ys-ll/uniterm/backend/sync"
 	"sync"
 	"testing"
 	"time"
@@ -349,3 +351,183 @@ func (k memKeychain) Get(key string) (string, error) {
 }
 func (k memKeychain) Set(key, val string) error { k.entries[key] = val; return nil }
 func (k memKeychain) Delete(key string) error   { delete(k.entries, key); return nil }
+func (k memKeychain) List() ([]string, error) {
+	keys := make([]string, 0, len(k.entries))
+	for name := range k.entries {
+		keys = append(keys, name)
+	}
+	return keys, nil
+}
+
+// --- Rekey regression: reencryptAll's saves used to be swallowed by the
+// F-105 hash-skip — Load seeds lastSavedHash with the plaintext content
+// hash, the rekey Save serializes the same content, and the write is
+// skipped, leaving every file under the old key while meta already points
+// at the new one. Restart then rejects even the correct password
+// (verification decrypts a field still under the old key) — an
+// unrecoverable lockout. ai.json was additionally missing from the
+// reencrypt list entirely. Every manifest secret file must decrypt under
+// the new key after any rekey. ---
+
+type rekeyHarness struct {
+	dir           string
+	kc            memKeychain
+	cs            *credentials.Store
+	connStore     *store.ConnectionStore
+	settingsStore *store.SettingsStore
+	identStore    *store.IdentityStore
+	proxyStore    *store.ProxyStore
+	aiStore       *store.AIConfigStore
+}
+
+func newRekeyHarness(t *testing.T, startMode, startPass string) rekeyHarness {
+	t.Helper()
+	dir := t.TempDir()
+	kc := memKeychain{entries: map[string]string{}}
+	cs := credentials.New(dir, kc)
+	files := make([]string, 0, len(store.SecretFiles))
+	for _, sf := range store.SecretFiles {
+		files = append(files, sf.File)
+	}
+	cs.SetSecretFiles(files)
+	if err := cs.Setup(startMode, startPass); err != nil {
+		t.Fatal(err)
+	}
+
+	connStore, err := store.NewConnectionStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settingsStore, err := store.NewSettingsStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identStore, err := store.NewIdentityStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxyStore, err := store.NewProxyStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aiStore, err := store.NewAIConfigStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connStore.SetPasswordStore(cs)
+	settingsStore.SetPasswordStore(cs)
+	identStore.SetPasswordStore(cs)
+	proxyStore.SetPasswordStore(cs)
+	aiStore.SetPasswordStore(cs)
+
+	h := rekeyHarness{dir: dir, kc: kc, cs: cs, connStore: connStore,
+		settingsStore: settingsStore, identStore: identStore,
+		proxyStore: proxyStore, aiStore: aiStore}
+	// Seed one encrypted secret into every manifest file.
+	if err := connStore.Save(session.ConnectionStoreData{Connections: []session.ConnectionConfig{{
+		ID: "c1", Type: "ssh", Host: "h", Port: 22, AuthType: "password", Password: "pw-conn"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := identStore.Save(session.IdentityStoreData{Identities: []session.Identity{{
+		ID: "i1", AuthType: "password", Password: "pw-ident"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := proxyStore.Save(session.ProxyStoreData{Proxies: []session.Proxy{{
+		ID: "px1", Kind: "socks5", Host: "127.0.0.1", Port: 1080, Pass: "pw-proxy"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := aiStore.Save(store.AIStoreData{Models: []store.AIModelConfig{{
+		ID: "m1", Name: "n", APIKey: "pw-ai", BaseURL: "http://x", Model: "m", Protocol: "openai"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := settingsStore.Save(store.AppSettings{AI: store.AISettings{Models: []store.AIModelConfig{{
+		ID: "m2", Name: "s", APIKey: "pw-ai-settings"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	return h
+}
+
+func (h rekeyHarness) app() *App {
+	return &App{dataDir: h.dir, credentialStore: h.cs,
+		connectionStore: h.connStore, settingsStore: h.settingsStore,
+		identityStore: h.identStore, proxyStore: h.proxyStore,
+		aiConfigStore: h.aiStore}
+}
+
+// assertAllFilesDecryptUnderKey reads every manifest secret file and checks
+// its first enc:v1 value opens with key — the observable of a completed
+// rekey (a stale file fails here even when meta/keychain were updated).
+func assertAllFilesDecryptUnderKey(t *testing.T, dir string, files []string, key []byte) {
+	t.Helper()
+	for _, f := range files {
+		raw, err := os.ReadFile(filepath.Join(dir, f))
+		if err != nil {
+			t.Fatalf("%s: %v", f, err)
+		}
+		s := string(raw)
+		i := strings.Index(s, credentials.Prefix)
+		if i < 0 {
+			t.Fatalf("%s: no ciphertext present", f)
+		}
+		val := s[i:]
+		if j := strings.Index(val, `"`); j >= 0 {
+			val = val[:j]
+		}
+		if _, err := credentials.DecryptField(val, key); err != nil {
+			t.Fatalf("%s: ciphertext does not decrypt under the new key (rekey wrote nothing): %v", f, err)
+		}
+	}
+}
+
+func rekeyRestart(t *testing.T, h rekeyHarness) *credentials.Store {
+	t.Helper()
+	files := make([]string, 0, len(store.SecretFiles))
+	for _, sf := range store.SecretFiles {
+		files = append(files, sf.File)
+	}
+	cs2 := credentials.New(h.dir, h.kc)
+	cs2.SetSecretFiles(files)
+	if err := cs2.AutoUnlock(); err != nil {
+		t.Fatalf("restart AutoUnlock: %v", err)
+	}
+	if !cs2.Status().Unlocked {
+		t.Fatalf("restart must auto-unlock after rekey: %+v", cs2.Status())
+	}
+	return cs2
+}
+
+func TestSwitchCredentialModeReencryptsEverySecretFile(t *testing.T) {
+	h := newRekeyHarness(t, credentials.ModeKeychain, "")
+	if err := h.app().SwitchCredentialMode(credentials.ModeMasterPassword, "new-pass"); err != nil {
+		t.Fatalf("switch: %v", err)
+	}
+	meta, err := credentials.ReadMeta(h.dir)
+	if err != nil || meta == nil {
+		t.Fatalf("read meta: %v %v", meta, err)
+	}
+	newKey := unitsync.DeriveKey("new-pass", meta.Salt)
+	files := make([]string, 0, len(store.SecretFiles))
+	for _, sf := range store.SecretFiles {
+		files = append(files, sf.File)
+	}
+	assertAllFilesDecryptUnderKey(t, h.dir, files, newKey)
+	rekeyRestart(t, h)
+}
+
+func TestChangeMasterPasswordReencryptsEverySecretFile(t *testing.T) {
+	h := newRekeyHarness(t, credentials.ModeMasterPassword, "old-pass")
+	if err := h.app().ChangeMasterPassword("old-pass", "new-pass"); err != nil {
+		t.Fatalf("change: %v", err)
+	}
+	meta, err := credentials.ReadMeta(h.dir)
+	if err != nil || meta == nil {
+		t.Fatalf("read meta: %v %v", meta, err)
+	}
+	newKey := unitsync.DeriveKey("new-pass", meta.Salt)
+	files := make([]string, 0, len(store.SecretFiles))
+	for _, sf := range store.SecretFiles {
+		files = append(files, sf.File)
+	}
+	assertAllFilesDecryptUnderKey(t, h.dir, files, newKey)
+	rekeyRestart(t, h)
+}

@@ -250,6 +250,18 @@ func (s *SettingsStore) filePath() string {
 }
 
 func (s *SettingsStore) Save(settings AppSettings) error {
+	return s.save(settings, false)
+}
+
+// ForceSave rewrites the file even when the content hash matches the
+// seeded state. Used by re-keying: the plaintext is unchanged, so the
+// F-105 hash-skip would otherwise swallow the re-encryption and leave
+// the file under the old key.
+func (s *SettingsStore) ForceSave(settings AppSettings) error {
+	return s.save(settings, true)
+}
+
+func (s *SettingsStore) save(settings AppSettings, force bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -259,7 +271,13 @@ func (s *SettingsStore) Save(settings AppSettings) error {
 
 	settings.AI.Models = models
 	// Shared Save envelope (filestore.go): hash-skip, encrypt, atomic write.
-	h, err := saveEncryptedFile(settingsFileName, s.filePath(), &settings, s.passwordStore, s.lastSavedHash)
+	skip := s.lastSavedHash
+	if force {
+		// Re-keying saves unchanged plaintext under a new key — the
+		// F-105 hash-skip would otherwise swallow the rewrite.
+		skip = forceWrite
+	}
+	h, err := saveEncryptedFile(settingsFileName, s.filePath(), &settings, s.passwordStore, skip)
 	s.lastSavedHash = h
 	return err
 }
@@ -314,8 +332,9 @@ func (s *SettingsStore) Load() (AppSettings, error) {
 		needsSave = true
 	}
 	if needsSave {
-		// Re-save through Save() which takes the lock itself.
-		_ = s.Save(settings)
+		// Force: the legacy-plaintext case changes nothing in the plaintext
+		// content, so the hash-skip would swallow the lazy encryption.
+		_ = s.ForceSave(settings)
 	} else {
 		s.lastSavedHash = hash
 	}

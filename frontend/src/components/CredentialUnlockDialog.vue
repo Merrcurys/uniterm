@@ -9,12 +9,14 @@
     :show-close="false"
   >
     <p v-if="cred.status.decryptFailed" class="form-hint">{{ t('unlock.decryptFailedHint') }}</p>
-    <el-input v-model="pw" type="password" show-password :placeholder="t('unlock.password')" @keyup.enter="onUnlock" />
+    <p v-else-if="cred.status.mode === 'keychain'" class="form-hint">{{ t('keychainLost.desc') }}</p>
+    <p v-else-if="!cred.status.mode" class="form-hint">{{ t('unlock.modeUnknownHint') }}</p>
+    <el-input v-if="cred.status.mode === 'master-password'" v-model="pw" type="password" show-password :placeholder="t('unlock.password')" @keyup.enter="onUnlock" />
     <div v-if="errorMsg" class="form-error">{{ errorMsg }}</div>
     <template #footer>
       <el-button @click="onQuit">{{ t('unlock.quit') }}</el-button>
       <el-button @click="onReset">{{ t('unlock.reset') }}</el-button>
-      <el-button type="primary" :loading="submitting" @click="onUnlock">{{ t('unlock.confirm') }}</el-button>
+      <el-button v-if="cred.status.mode === 'master-password'" type="primary" :loading="submitting" @click="onUnlock">{{ t('unlock.confirm') }}</el-button>
     </template>
   </el-dialog>
 </template>

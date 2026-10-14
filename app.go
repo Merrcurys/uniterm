@@ -97,8 +97,8 @@ type App struct {
 
 	// MCP server (external AI agents): listener + token auth + approval
 	// bridge. Lazily created once stores are ready (ensureMCPServer).
-	mcpServer   *mcp.Server
-	mcpOnce     stdsync.Once
+	mcpServer *mcp.Server
+	mcpOnce   stdsync.Once
 	// mcpApprovals maps pending approval request ids to their answer channels.
 	mcpApprovals   map[string]chan mcpApprovalVerdict
 	mcpApprovalsMu stdsync.Mutex
@@ -2211,11 +2211,12 @@ func (a *App) GetCredentialStatus() (CredentialStatus, error) {
 	}
 	st := a.credentialStore.Status()
 	return CredentialStatus{
-		Mode:          st.Mode,
-		Unlocked:      st.Unlocked,
-		NeedsSetup:    st.NeedsSetup,
-		KeychainLost:  st.KeychainLost,
-		DecryptFailed: st.DecryptFailed,
+		Mode:            st.Mode,
+		Unlocked:        st.Unlocked,
+		NeedsSetup:      st.NeedsSetup,
+		KeychainLost:    st.KeychainLost,
+		DecryptFailed:   st.DecryptFailed,
+		ExistingSecrets: st.ExistingSecrets,
 	}, nil
 }
 
@@ -2329,9 +2330,24 @@ func (a *App) ResetCredentials() error {
 }
 
 // reencryptAll decrypts all secret fields under oldKey and re-encrypts them
-// under newKey by loading (decrypt) then saving (encrypt) both stores.
+// under newKey by loading (decrypt) then force-saving (encrypt) every store
+// with wired secrets. The force flag bypasses the F-105 hash-skip: a rekey
+// saves unchanged plaintext under a new key, which the skip would otherwise
+// swallow — meta/keychain would then point at the new key while every file
+// stays under the old one (an unrecoverable lockout).
+//
+// All loads run before any write, so a load failure leaves the files
+// untouched. Saves all run to completion before errors are checked; on any
+// failure the key goes back to oldKey and every store is force-saved again,
+// which re-encrypts it under the old key — all files end up under a single
+// consistent key, exactly as before the rekey.
+//
+// The wired store set is checked against the SecretFiles manifest before any
+// key is swapped, so a secret file without a wired store (the ai.json gap
+// that once stayed under the old key) fails the rekey loudly instead of
+// being silently skipped.
 func (a *App) reencryptAll(cs *credentials.Store, oldKey, newKey []byte) error {
-	if a.connectionStore == nil || a.settingsStore == nil || a.identityStore == nil || a.proxyStore == nil {
+	if a.connectionStore == nil || a.settingsStore == nil || a.identityStore == nil || a.proxyStore == nil || a.aiConfigStore == nil {
 		return errors.New("stores not initialized")
 	}
 	conns, err := a.connectionStore.Load()
@@ -2350,35 +2366,35 @@ func (a *App) reencryptAll(cs *credentials.Store, oldKey, newKey []byte) error {
 	if err != nil {
 		return err
 	}
-	// Swap key, re-encrypt on save.
+	ai, err := a.aiConfigStore.Load()
+	if err != nil {
+		return err
+	}
+	saves := []func() error{
+		func() error { return a.connectionStore.ForceSave(conns) },
+		func() error { return a.settingsStore.ForceSave(settings) },
+		func() error { return a.identityStore.ForceSave(idents) },
+		func() error { return a.proxyStore.ForceSave(proxies) },
+		func() error { return a.aiConfigStore.ForceSave(ai) },
+	}
 	cs.SetKey(newKey)
-	if err := a.connectionStore.Save(conns); err != nil {
-		cs.SetKey(oldKey)
-		return err
+	var saveErrs []error
+	for _, save := range saves {
+		if err := save(); err != nil {
+			saveErrs = append(saveErrs, err)
+		}
 	}
-	if err := a.settingsStore.Save(settings); err != nil {
-		// Roll the connection store back under oldKey so both files stay
-		// encrypted under a single consistent key.
-		cs.SetKey(oldKey)
-		_ = a.connectionStore.Save(conns)
-		return err
+	if len(saveErrs) == 0 {
+		return nil
 	}
-	if err := a.identityStore.Save(idents); err != nil {
-		// Roll back under oldKey: revert the key and re-save conns and settings
-		// so all files stay encrypted under a single consistent key.
-		cs.SetKey(oldKey)
-		_ = a.connectionStore.Save(conns)
-		_ = a.settingsStore.Save(settings)
-		return err
+	// Roll everything back under oldKey. The failed store's file is still
+	// under the old key, so re-saving it is a no-op rewrite of the same
+	// ciphertext; the rest are switched back.
+	cs.SetKey(oldKey)
+	for _, save := range saves {
+		_ = save()
 	}
-	if err := a.proxyStore.Save(proxies); err != nil {
-		cs.SetKey(oldKey)
-		_ = a.connectionStore.Save(conns)
-		_ = a.settingsStore.Save(settings)
-		_ = a.identityStore.Save(idents)
-		return err
-	}
-	return nil
+	return errors.Join(saveErrs...)
 }
 
 // dataDirContains reports whether sub denotes the same directory as dir or

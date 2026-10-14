@@ -52,6 +52,18 @@ func (s *AIConfigStore) Exists() bool {
 // settings.json: best-effort — when no passwordStore is wired the values
 // are kept as-is rather than failing the save).
 func (s *AIConfigStore) Save(cfg AIStoreData) error {
+	return s.save(cfg, false)
+}
+
+// ForceSave rewrites the file even when the content hash matches the
+// seeded state. Used by re-keying: the plaintext is unchanged, so the
+// F-105 hash-skip would otherwise swallow the re-encryption and leave
+// the file under the old key.
+func (s *AIConfigStore) ForceSave(cfg AIStoreData) error {
+	return s.save(cfg, true)
+}
+
+func (s *AIConfigStore) save(cfg AIStoreData, force bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -59,7 +71,13 @@ func (s *AIConfigStore) Save(cfg AIStoreData) error {
 	copy(models, cfg.Models)
 	cfg.Models = models
 	// Shared Save envelope (filestore.go): hash-skip, encrypt, atomic write.
-	h, err := saveEncryptedFile(aiConfigFileName, s.filePath(), &cfg, s.passwordStore, s.lastSavedHash)
+	skip := s.lastSavedHash
+	if force {
+		// Re-keying saves unchanged plaintext under a new key — the
+		// F-105 hash-skip would otherwise swallow the rewrite.
+		skip = forceWrite
+	}
+	h, err := saveEncryptedFile(aiConfigFileName, s.filePath(), &cfg, s.passwordStore, skip)
 	s.lastSavedHash = h
 	return err
 }
@@ -84,7 +102,9 @@ func (s *AIConfigStore) Load() (AIStoreData, error) {
 		needsSave = true
 	}
 	if needsSave {
-		_ = s.Save(cfg)
+		// Force: the legacy-plaintext case changes nothing in the plaintext
+		// content, so the hash-skip would swallow the lazy encryption.
+		_ = s.ForceSave(cfg)
 	} else {
 		s.lastSavedHash = hash
 	}
