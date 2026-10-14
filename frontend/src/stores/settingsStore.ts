@@ -88,9 +88,16 @@ export const useSettingsStore = defineStore('settings', () => {
     let theme = settings.value.theme
     if (theme === 'system') {
       const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
-      document.documentElement.dataset.theme = prefersDark ? 'dark' : 'light'
-    } else {
-      document.documentElement.dataset.theme = theme
+      theme = prefersDark ? 'dark' : 'light'
+    }
+    document.documentElement.dataset.theme = theme
+    // Cache the resolved theme for the pre-paint script in index.html (issue
+    // #1135): it applies this before the first paint so the window doesn't
+    // flash the dark no-[data-theme] default while settings load.
+    try {
+      localStorage.setItem('appTheme', theme)
+    } catch {
+      // private mode etc. — the pre-paint script falls back to matchMedia
     }
   }
 
@@ -105,6 +112,10 @@ export const useSettingsStore = defineStore('settings', () => {
     } finally {
       loaded.value = true
     }
+    // Apply the theme before anything slow: the AI store load and the shell
+    // probe (which spawns wsl.exe) below must not delay data-theme past the
+    // first paint. applyTheme() only depends on the loaded settings.
+    applyTheme()
     await useAIConfigStore().load()
     recomposeAi()
     lastSavedAiJson = JSON.stringify({ maxTurns: settings.value.ai.maxTurns, models: settings.value.ai.models })
@@ -118,7 +129,6 @@ export const useSettingsStore = defineStore('settings', () => {
     // logs enabled before the user opens the settings tab already
     // respect it. Fire-and-forget; the backend has a safe empty fallback.
     SetDefaultSessionLogDir(settings.value.terminal.sessionLogDir || '').catch(() => {})
-    applyTheme()
     setLocale(settings.value.language)
   }
 
