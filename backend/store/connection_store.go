@@ -51,6 +51,18 @@ func (s *ConnectionStore) filePath() string {
 }
 
 func (s *ConnectionStore) Save(data session.ConnectionStoreData) error {
+	return s.save(data, false)
+}
+
+// ForceSave rewrites the file even when the content hash matches the
+// seeded state. Used by re-keying: the plaintext is unchanged, so the
+// F-105 hash-skip would otherwise swallow the re-encryption and leave
+// the file under the old key.
+func (s *ConnectionStore) ForceSave(data session.ConnectionStoreData) error {
+	return s.save(data, true)
+}
+
+func (s *ConnectionStore) save(data session.ConnectionStoreData, force bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -79,7 +91,13 @@ func (s *ConnectionStore) Save(data session.ConnectionStoreData) error {
 		Connections: connections,
 	}
 	// Shared Save envelope (filestore.go): hash-skip, encrypt, atomic write.
-	h, err := saveEncryptedFile(storeFileName, s.filePath(), &saveData, s.passwordStore, s.lastSavedHash)
+	skip := s.lastSavedHash
+	if force {
+		// Re-keying saves unchanged plaintext under a new key — the
+		// F-105 hash-skip would otherwise swallow the rewrite.
+		skip = forceWrite
+	}
+	h, err := saveEncryptedFile(storeFileName, s.filePath(), &saveData, s.passwordStore, skip)
 	s.lastSavedHash = h
 	if errors.Is(err, ErrNoCipher) {
 		return errors.New("passwordStore not initialized; refusing to save plaintext password")

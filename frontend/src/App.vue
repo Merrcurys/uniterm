@@ -155,7 +155,6 @@
     <DataDirDialog v-model:visible="dataDirVisible" :first-run="credStore.firstRun || credStore.dataDirInfo.firstRun" @done="onDataDirDone" />
     <EncryptionModeDialog v-model:visible="encryptVisible" :existing-secrets="credStore.status.existingSecrets" @done="onEncryptDone" />
     <CredentialUnlockDialog v-model:visible="unlockVisible" @done="onUnlockDone" @reset="onReset" />
-    <KeychainLostDialog v-model:visible="keychainLostVisible" @done="onKeychainLostDone" />
     <MobileKeyBar v-if="keyBarSessionId" :session-id="keyBarSessionId" />
   </div>
   </el-config-provider>
@@ -202,7 +201,6 @@ import UpdateDialog from './components/UpdateDialog.vue'
 import DataDirDialog from './components/DataDirDialog.vue'
 import EncryptionModeDialog from './components/EncryptionModeDialog.vue'
 import CredentialUnlockDialog from './components/CredentialUnlockDialog.vue'
-import KeychainLostDialog from './components/KeychainLostDialog.vue'
 import CredentialPrompt from './components/CredentialPrompt.vue'
 import type { CredentialResult } from './components/CredentialPrompt.vue'
 import MCPApprovalDialog from './components/MCPApprovalDialog.vue'
@@ -388,21 +386,22 @@ const credStore = useCredentialStore()
 const dataDirVisible = ref(false)
 const encryptVisible = ref(false)
 const unlockVisible = ref(false)
-const keychainLostVisible = ref(false)
 
-// Determine which credential dialog (keychain-lost / setup / unlock) to show
-// based on the current store status. Shared by startup and by the first-run
+// Determine which credential dialog (recovery-unlock / setup) to show based
+// on the current store status. Shared by startup and by the first-run
 // data-dir selection path so that pointing at a directory that already holds
 // master-password config correctly prompts for the password.
+//
+// Mode selection is a first-run (and post-reset) decision only: any state
+// with existing local data — a lost keychain key on a copied dir, a failed
+// decrypt, missing meta over surviving ciphertext — lands in the unlock
+// dialog, whose reset button is the only path that may clear credentials
+// before a new mode is chosen. resolveCredentialDialog must never route
+// straight to EncryptionModeDialog over existing secrets.
 function resolveCredentialDialog() {
-  if (credStore.status.keychainLost) { keychainLostVisible.value = true; return }
-  if (credStore.status.needsSetup) { encryptVisible.value = true; return }
-  // DecryptFailed covers both modes: a recovered key that cannot open the
-  // data must be answered with the master password (master-password mode) or
-  // clearing credentials (keychain mode) — never with a silent blank UI.
-  if (credStore.status.decryptFailed || (!credStore.status.unlocked && credStore.status.mode === 'master-password')) {
-    unlockVisible.value = true
-  }
+  const st = credStore.status
+  if (st.needsSetup && !st.existingSecrets) { encryptVisible.value = true; return }
+  if (!st.unlocked) { unlockVisible.value = true }
 }
 
 function onDataDirDone(restart: boolean) {
@@ -429,7 +428,6 @@ function onUnlockDone() {
   connectionStore.load()
   settingsStore.reload()
 }
-function onKeychainLostDone() { credStore.reset().then(() => { encryptVisible.value = true }) }
 async function onReset() {
   try {
     await ElMessageBox.confirm(t('unlock.resetConfirm'), t('unlock.reset'), { type: 'warning' })

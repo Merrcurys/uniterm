@@ -39,6 +39,18 @@ func (s *IdentityStore) filePath() string {
 // passwordStore is wired. Values already prefixed (credentials.IsEncrypted)
 // are skipped so a save doesn't double-encrypt previously encrypted data.
 func (s *IdentityStore) Save(data session.IdentityStoreData) error {
+	return s.save(data, false)
+}
+
+// ForceSave rewrites the file even when the content hash matches the
+// seeded state. Used by re-keying: the plaintext is unchanged, so the
+// F-105 hash-skip would otherwise swallow the re-encryption and leave
+// the file under the old key.
+func (s *IdentityStore) ForceSave(data session.IdentityStoreData) error {
+	return s.save(data, true)
+}
+
+func (s *IdentityStore) save(data session.IdentityStoreData, force bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -48,7 +60,13 @@ func (s *IdentityStore) Save(data session.IdentityStoreData) error {
 
 	out := session.IdentityStoreData{Identities: identities}
 	// Shared Save envelope (filestore.go): hash-skip, encrypt, atomic write.
-	h, err := saveEncryptedFile(identityStoreFileName, s.filePath(), &out, s.passwordStore, s.lastSavedHash)
+	skip := s.lastSavedHash
+	if force {
+		// Re-keying saves unchanged plaintext under a new key — the
+		// F-105 hash-skip would otherwise swallow the rewrite.
+		skip = forceWrite
+	}
+	h, err := saveEncryptedFile(identityStoreFileName, s.filePath(), &out, s.passwordStore, skip)
 	s.lastSavedHash = h
 	return err
 }

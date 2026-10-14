@@ -35,6 +35,18 @@ func (s *ProxyStore) filePath() string {
 // wired. Values already prefixed (credentials.IsEncrypted) are skipped so a
 // save doesn't double-encrypt previously encrypted data.
 func (s *ProxyStore) Save(data session.ProxyStoreData) error {
+	return s.save(data, false)
+}
+
+// ForceSave rewrites the file even when the content hash matches the
+// seeded state. Used by re-keying: the plaintext is unchanged, so the
+// F-105 hash-skip would otherwise swallow the re-encryption and leave
+// the file under the old key.
+func (s *ProxyStore) ForceSave(data session.ProxyStoreData) error {
+	return s.save(data, true)
+}
+
+func (s *ProxyStore) save(data session.ProxyStoreData, force bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -44,7 +56,13 @@ func (s *ProxyStore) Save(data session.ProxyStoreData) error {
 
 	out := session.ProxyStoreData{Proxies: proxies}
 	// Shared Save envelope (filestore.go): hash-skip, encrypt, atomic write.
-	h, err := saveEncryptedFile(proxyStoreFileName, s.filePath(), &out, s.passwordStore, s.lastSavedHash)
+	skip := s.lastSavedHash
+	if force {
+		// Re-keying saves unchanged plaintext under a new key — the
+		// F-105 hash-skip would otherwise swallow the rewrite.
+		skip = forceWrite
+	}
+	h, err := saveEncryptedFile(proxyStoreFileName, s.filePath(), &out, s.passwordStore, skip)
 	s.lastSavedHash = h
 	return err
 }
