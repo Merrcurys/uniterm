@@ -195,6 +195,11 @@ type AppSettings struct {
 	SftpTransferPanelVisible *bool                 `json:"sftpTransferPanelVisible,omitempty"`
 	CustomTerminalThemes     []CustomTerminalTheme `json:"customTerminalThemes"`
 	DefaultLocalShell        string                `json:"defaultLocalShell"`
+	// DefaultTermType is the terminal type used by ssh/telnet/local
+	// connections that do not set their own TermType. Empty means the
+	// backend/session DefaultTermType (xterm-256color) applies; the frontend
+	// merges it into the connect config.
+	DefaultTermType string `json:"defaultTermType,omitempty"`
 	// GitBashPath is an optional user-supplied Git for Windows location (the
 	// install directory or bash.exe itself, e.g. a scoop install). Resolved on
 	// Windows when listing the available local shells.

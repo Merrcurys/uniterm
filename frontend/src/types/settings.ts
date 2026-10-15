@@ -308,6 +308,9 @@ export interface AppSettings {
   sftpTransferPanelVisible: boolean
   customTerminalThemes: CustomTerminalTheme[]
   defaultLocalShell: string
+  // Terminal type used by ssh/telnet/local connections that don't set their
+  // own termType. Empty = xterm-256color (backend DefaultTermType).
+  defaultTermType: string
   gitBashPath: string
   // Which side of the tab the close (X) button sits on.
   tabCloseButton: 'left' | 'right'
@@ -416,6 +419,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   sftpTransferPanelVisible: false,
   customTerminalThemes: [],
   defaultLocalShell: '',
+  defaultTermType: '',
   gitBashPath: '',
   tabCloseButton: 'left',
   showTabShortcutHints: true,

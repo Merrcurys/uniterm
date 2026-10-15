@@ -547,6 +547,21 @@
                 <el-option label="VT220 Delete (ESC[3~)" value="vt220" />
               </el-select>
             </el-form-item>
+            <el-form-item
+              v-if="form.type === 'ssh' || form.type === 'telnet' || form.type === 'local'"
+              :label="t('conn.termType')"
+            >
+              <el-select v-model="form.termType" :placeholder="t('conn.termTypeDefault')">
+                <el-option :label="t('conn.termTypeDefault')" value="" />
+                <el-option label="xterm-256color" value="xterm-256color" />
+                <el-option label="xterm" value="xterm" />
+                <el-option label="vt100" value="vt100" />
+                <el-option label="vt220" value="vt220" />
+                <el-option label="vt320" value="vt320" />
+                <el-option label="ansi" value="ansi" />
+                <el-option label="linux" value="linux" />
+              </el-select>
+            </el-form-item>
             <el-form-item v-if="form.type === 'ssh'" :label="t('conn.fileTransferProto')">
               <el-radio-group v-model="form.fileTransferProto">
                 <el-radio-button value="sftp">SFTP</el-radio-button>
@@ -1087,6 +1102,7 @@ const form = reactive<ConnectionConfig>({
   vncShared: true,
   vncRepeaterID: '',
   encoding: 'utf-8',
+  termType: '',
   backspaceKey: 'del',
   telnetNegotiationMode: 'active' as 'active' | 'passive',
   telnetSendMode: 'character' as 'character' | 'line',
@@ -1479,6 +1495,7 @@ function resetForm() {
   form.vncShared = true
   form.vncRepeaterID = ''
   form.encoding = 'utf-8'
+  form.termType = ''
   form.backspaceKey = 'del'
   form.telnetNegotiationMode = 'active'
   form.telnetSendMode = 'character'
@@ -1676,6 +1693,11 @@ function normalizeForm(): ConnectionConfig {
     form.serialParity = serialParityValue.value
   }
   const normalized = { ...form }
+  // Terminal type only applies to ssh/telnet/local; strip it elsewhere so
+  // old/other connection JSON stays clean ("" means "follow the app default").
+  if (normalized.type !== 'ssh' && normalized.type !== 'telnet' && normalized.type !== 'local') {
+    normalized.termType = undefined
+  }
   // SSH algorithms: only SSH-like session types carry the preference.
   // Compatible mode stores nothing (backend default), secure mode stores
   // just the mode; custom mode requires all four lists filled.

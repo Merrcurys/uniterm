@@ -216,6 +216,10 @@ type ConnectionConfig struct {
 	// Terminal character encoding for ssh/telnet, filename charset for ftp:
 	// "" / "utf-8"(default) | "gbk" | "gb2312" | "gb18030" | "big5" | "shift-jis" | "euc-jp" | "euc-kr" | "latin-1"
 	Encoding string `json:"encoding,omitempty"`
+	// TermType is the terminal type reported to the remote host (SSH
+	// pty-req / telnet TTYPE / local TERM env). "" falls back to
+	// DefaultTermType; see EffectiveTermType for the whitelist.
+	TermType string `json:"termType,omitempty"`
 	// X11Forwarding enables SSH X11 forwarding (ssh -X semantics). Sends an
 	// "x11-req" global request after RequestPty; accepts "x11" channels from
 	// the server and bridges them to the local X server at $DISPLAY. If
@@ -285,6 +289,46 @@ type ConnectionConfig struct {
 	// secret is ever duplicated here.
 	WorkspaceMembers []SavedWorkspaceMember    `json:"workspaceMembers,omitempty"`
 	WorkspaceLayout  *SavedWorkspaceLayoutNode `json:"workspaceLayout,omitempty"`
+}
+
+// DefaultTermType is the terminal type reported to remote hosts when the
+// connection does not configure one (the pty-req terminal name for SSH, the
+// TTYPE reply for telnet, and the TERM environment entry for local shells).
+const DefaultTermType = "xterm-256color"
+
+// supportedTermTypes whitelists the terminal names a connection may choose
+// from. The value is sent verbatim to remote hosts (SSH pty-req, telnet
+// TTYPE), so anything outside this set falls back to DefaultTermType instead
+// of reaching the server's terminfo lookup.
+var supportedTermTypes = map[string]bool{
+	"xterm-256color": true,
+	"xterm":          true,
+	"vt100":          true,
+	"vt220":          true,
+	"vt320":          true,
+	"ansi":           true,
+	"linux":          true,
+}
+
+// EffectiveTermType maps the connection's terminal type to the value sent to
+// the remote host: the configured value when supported, DefaultTermType
+// otherwise (including for the empty/unset case).
+func EffectiveTermType(cfgTermType string) string {
+	if supportedTermTypes[cfgTermType] {
+		return cfgTermType
+	}
+	return DefaultTermType
+}
+
+// ExplicitTermType returns the connection's terminal type only when the user
+// explicitly chose a supported one, and "" otherwise. Local-shell sessions
+// use this to keep their existing "never override inherited environment"
+// behavior unless the user made an explicit per-connection choice.
+func ExplicitTermType(cfgTermType string) string {
+	if supportedTermTypes[cfgTermType] {
+		return cfgTermType
+	}
+	return ""
 }
 
 // SavedWorkspaceMember is one terminal slot inside a saved workspace.

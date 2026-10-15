@@ -1,3 +1,5 @@
+import type { ConnectionConfig } from '../types/session'
+
 // Translate xterm.js's default backspace byte (ASCII DEL, 0x7F) into the byte
 // sequence the remote end expects. xterm.js always emits 0x7F for the physical
 // Backspace key, which works on most modern Linux/macOS PTYs but is silently
@@ -46,4 +48,16 @@ export function applyBackspaceKey(
   if (!data.includes('\x7f')) return data
   const replacement = effective === 'bs' ? '\x08' : '\x1b[3~'
   return data.split('\x7f').join(replacement)
+}
+
+// Fill the connection's termType with the app-level default when the
+// connection does not choose one itself. Returns a new config; the input is
+// never mutated. Backend session.EffectiveTermType remains the final guard:
+// unknown values fall back to xterm-256color there.
+export function withDefaultTermType(
+  config: ConnectionConfig,
+  defaultTermType: string
+): ConnectionConfig {
+  if (config.termType || !defaultTermType) return config
+  return { ...config, termType: defaultTermType }
 }
