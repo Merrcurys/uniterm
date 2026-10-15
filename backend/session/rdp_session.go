@@ -46,6 +46,7 @@ var (
 	procGetClassNameW      = user32Dll.NewProc("GetClassNameW")
 	procGetWindowTextW     = user32Dll.NewProc("GetWindowTextW")
 	procGetWindow          = user32Dll.NewProc("GetWindow")
+	procMsgWaitForMultiple = user32Dll.NewProc("MsgWaitForMultipleObjectsEx")
 
 	// kernel32Dll is declared in local_session_windows.go (same package).
 	procGetCurrentProcID = kernel32Dll.NewProc("GetCurrentProcessId")
@@ -128,6 +129,13 @@ const (
 	rdpTopReserve    = 80
 	rdpBottomReserve = 32
 	rdpSideMargin    = 4
+)
+
+// Message-pump constants for waiting on input instead of sleeping.
+const (
+	QS_ALLINPUT         = 0x04FF
+	MWMO_INPUTAVAILABLE = 0x0004
+	rdpWaitTimeout      = 0x00000102 // WAIT_TIMEOUT
 )
 
 type RDPSession struct {
@@ -823,9 +831,19 @@ func (s *RDPSession) runMessagePump() {
 			procDispatchMessage.Call(uintptr(unsafe.Pointer(&m)))
 			noMsgCount = 0
 		} else {
-			// No message available; sleep briefly to avoid busy-wait.
+			// No message available: block until one arrives or the 50 ms
+			// housekeeping tick elapses. A plain Sleep here delayed every
+			// input event and repaint by up to 50 ms, including the low-level
+			// keyboard hook the control installs for KeyboardHookMode=1,
+			// which Windows runs on this thread.
+			r, _, _ := procMsgWaitForMultiple.Call(0, 0, 50, QS_ALLINPUT, MWMO_INPUTAVAILABLE)
+			if r == 0 { // WAIT_OBJECT_0: input is waiting, pump it now
+				continue
+			}
+			if r != rdpWaitTimeout { // WAIT_FAILED: keep the previous pacing
+				time.Sleep(50 * time.Millisecond)
+			}
 			// Check hwnd every ~1 second via heartbeat counter.
-			time.Sleep(50 * time.Millisecond)
 			noMsgCount++
 
 			// Detect full-screen exit via the built-in connection bar: the
