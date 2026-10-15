@@ -260,6 +260,29 @@ export interface SFTPBookmarks {
   remotePaths: string[]
 }
 
+// Start-page blocks: the content sections of the new-tab start
+// page the user can show/hide and reorder. The search box is a fixed header
+// row and is not configurable.
+export type StartPageBlock = 'favorites' | 'recent' | 'groups'
+
+export interface StartPageSettings {
+  // Missing keys fall back to START_PAGE_DEFAULTS (per-key merge on load).
+  visible: Record<StartPageBlock, boolean>
+  // Render order of the content sections.
+  order: StartPageBlock[]
+}
+
+export const START_PAGE_BLOCK_LABEL_KEYS: Record<StartPageBlock, string> = {
+  favorites: 'startTab.favorites',
+  recent: 'startTab.recentConnections',
+  groups: 'startTab.groups',
+}
+
+export const START_PAGE_DEFAULTS: StartPageSettings = {
+  visible: { favorites: true, recent: true, groups: true },
+  order: ['favorites', 'recent', 'groups'],
+}
+
 export interface AppSettings {
   theme: Theme
   language: Language
@@ -302,6 +325,10 @@ export interface AppSettings {
   // Which connection-sidebar tab icons are visible, keyed by view id.
   // Missing keys fall back to SIDEBAR_TAB_DEFAULTS.
   sidebarTabs: Record<string, boolean>
+  // Which blocks the new-tab start page shows and in what order. See the
+  // persistence-contract note on TerminalSettings: this field MUST also
+  // exist in the Go AppSettings (backend/store/settings_store.go).
+  startPage: StartPageSettings
 }
 
 // Default visibility per sidebar view. "connections" is the primary view and
@@ -394,7 +421,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
   showTabShortcutHints: true,
   hostListMenuStyle: 'button',
   newTabAction: 'startPage',
-  sidebarTabs: { ...SIDEBAR_TAB_DEFAULTS }
+  sidebarTabs: { ...SIDEBAR_TAB_DEFAULTS },
+  startPage: {
+    visible: { ...START_PAGE_DEFAULTS.visible },
+    order: [...START_PAGE_DEFAULTS.order]
+  }
 }
 
 export interface TerminalThemeEntry { label: string; value: string; type: 'dark' | 'light' }
