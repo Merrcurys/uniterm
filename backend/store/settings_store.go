@@ -220,11 +220,27 @@ type AppSettings struct {
 	// builds (which lack this field) still load; a nil map means "use the
 	// frontend defaults" (everything visible).
 	SidebarTabs map[string]bool `json:"sidebarTabs,omitempty"`
+	// StartPage controls which blocks (search/favorites/recent/groups) the
+	// start page shows and in what order. Pointer + omitempty so
+	// settings.json written by older builds (which lack this field) still
+	// loads; a nil value means "use the frontend defaults" (everything
+	// visible, search → favorites → recent → groups).
+	StartPage *StartPageSettings `json:"startPage,omitempty"`
 }
 
 type SFTPBookmarks struct {
 	LocalPaths  []string `json:"localPaths"`
 	RemotePaths []string `json:"remotePaths"`
+}
+
+// StartPageSettings controls the layout of the new-tab start page: which
+// blocks (search/favorites/recent/groups) are visible and in what order.
+// Block ids are strings rather than a typed enum so hand-edited or
+// cross-version settings.json files degrade gracefully (unknown ids are
+// ignored by the frontend).
+type StartPageSettings struct {
+	Visible map[string]bool `json:"visible,omitempty"`
+	Order   []string        `json:"order,omitempty"`
 }
 
 type SettingsStore struct {

@@ -399,6 +399,21 @@ function mergeSettings(loaded: AppSettings): AppSettings {
     sidebarTabs: {
       ...DEFAULT_SETTINGS.sidebarTabs,
       ...(loaded.sidebarTabs || {})
-    }
+    },
+    // Per-key visible merge; the order is validated against the known block
+    // ids and backfilled with any missing blocks (older settings.json files
+    // or hand-edited ones).
+    startPage: mergeStartPage(loaded.startPage)
   }
+}
+
+function mergeStartPage(loaded: AppSettings['startPage']): AppSettings['startPage'] {
+  const visible = {
+    ...DEFAULT_SETTINGS.startPage.visible,
+    ...(loaded?.visible || {})
+  }
+  const known = DEFAULT_SETTINGS.startPage.order
+  const persisted = (loaded?.order || []).filter(b => known.includes(b))
+  const order = [...persisted, ...known.filter(b => !persisted.includes(b))]
+  return { visible, order }
 }
