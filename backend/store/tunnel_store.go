@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"sync"
 
 	"github.com/ys-ll/uniterm/backend/session"
 )
@@ -13,6 +14,7 @@ const tunnelsFileName = "tunnels.json"
 // TunnelStore persists the user's SSH tunnel definitions to tunnels.json in the
 // app config dir, mirroring QuickCommandsStore.
 type TunnelStore struct {
+	mu            sync.Mutex
 	configDir     string
 	lastSavedHash string // F-105 skip state (pre-encryption content hash)
 }
@@ -27,12 +29,16 @@ func (s *TunnelStore) filePath() string {
 
 // Shared Save envelope (filestore.go): hash-skip, encrypt, atomic write.
 func (s *TunnelStore) Save(data session.TunnelStoreData) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	h, err := saveEncryptedFile(tunnelsFileName, s.filePath(), &data, nil, s.lastSavedHash)
 	s.lastSavedHash = h
 	return err
 }
 
 func (s *TunnelStore) Load() (session.TunnelStoreData, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	out, _, hash, existed, err := loadEncryptedFile[session.TunnelStoreData](tunnelsFileName, s.filePath(), nil)
 	if !existed {
 		return session.TunnelStoreData{Version: 1, Groups: []session.TunnelGroup{}, Tunnels: []session.Tunnel{}}, nil

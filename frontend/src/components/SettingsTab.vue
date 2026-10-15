@@ -949,28 +949,29 @@
         <el-button type="primary" @click="openTunnelDialog()">{{ t('tunnels.addTunnel') }}</el-button>
         <el-table :data="tunnelStore.tunnels" size="small" style="margin-top: 0.75rem">
           <el-table-column prop="name" :label="t('tunnels.name')" />
-          <el-table-column :label="t('tunnels.modeCol')" :width="uiPx(100)">
+          <el-table-column :label="t('tunnels.modeCol')" :width="uiPx(150)">
             <template #default="{ row }">{{ modeName(row.mode) }}</template>
           </el-table-column>
           <el-table-column :label="t('tunnels.listenCol')" :width="uiPx(120)">
             <template #default="{ row }">:{{ effPort(row) }}</template>
           </el-table-column>
-          <el-table-column :label="t('tunnels.statusCol')" :width="uiPx(120)">
+          <el-table-column :label="t('tunnels.statusCol')" :width="uiPx(160)">
             <template #default="{ row }">
               <el-switch
-                :model-value="statusOf(row.id) === 'running'"
+                :model-value="tunnelStore.isActive(row.id)"
+                :title="tunnelStore.isActive(row.id) ? t('tunnels.stop') : t('tunnels.start')"
                 @change="toggleRun(row)"
-                :loading="togglingTunnelId === row.id"
               />
+              <div :title="tunnelStore.statusTitle(row.id)">{{ tunnelStore.statusLabel(row.id) }}</div>
             </template>
           </el-table-column>
           <el-table-column :label="t('common.actions')" :width="uiPx(160)">
             <template #default="{ row }">
-              <!-- Editing a running tunnel would desync the form from what's
-                   actually running; edits require a stop first. -->
+              <!-- Connecting and reconnecting tunnels must also stop before edits. -->
               <el-button
                 size="small"
-                :disabled="tunnelStore.statusOf(row.id) === 'running'"
+                :disabled="tunnelStore.isActive(row.id)"
+                :title="tunnelStore.isActive(row.id) ? t('tunnels.editDisabledActive') : undefined"
                 @click="openTunnelDialog(row)"
               >{{ t('common.edit') }}</el-button>
               <el-button size="small" type="danger" @click="removeTunnel(row)">{{ t('common.delete') }}</el-button>
@@ -2486,7 +2487,6 @@ async function toggleProxy(row: Proxy, v: boolean) {
 const tunnelStore = useTunnelStore()
 const tunnelDialogVisible = ref(false)
 const editingTunnelId = ref<string | undefined>(undefined)
-const togglingTunnelId = ref<string | undefined>(undefined)
 
 // ── Sidebar tab visibility ──
 // Writable computed over AppSettings.sidebarTabs. "connections" never appears
@@ -2507,6 +2507,7 @@ function onSidebarTabsChange() {
   settingsStore.save()
 }
 function openTunnelDialog(t?: Tunnel) {
+  if (t && tunnelStore.isActive(t.id)) return
   editingTunnelId.value = t?.id
   tunnelDialogVisible.value = true
 }
@@ -2515,23 +2516,15 @@ async function removeTunnel(row: Tunnel) {
 }
 const modeName = (m: TunnelMode) => t(`tunnels.mode.${m}`)
 const effPort = (t: Tunnel) => tunnelStore.states[t.id]?.localPort || t.listenPort
-const statusOf = (id: string) => tunnelStore.statusOf(id)
 async function toggleRun(row: Tunnel) {
-  if (statusOf(row.id) === 'running') {
-    togglingTunnelId.value = row.id
+  if (tunnelStore.isActive(row.id)) {
     await tunnelStore.stop(row.id)
-    togglingTunnelId.value = undefined
   } else {
     // Exit connection without saved credentials: prompt for user/password and
     // pass them inline (backend fills only empty fields). Cancel aborts.
     const creds = await resolveTunnelCredentials(row.sshConnId)
     if (!creds) return
-    togglingTunnelId.value = row.id
-    const st = await tunnelStore.start(row.id, creds.user, creds.password)
-    togglingTunnelId.value = undefined
-    if (st.status === 'error') {
-      msg.error(st.error || t('tunnels.startFailed'))
-    }
+    await tunnelStore.start(row.id, creds.user, creds.password)
   }
 }
 
