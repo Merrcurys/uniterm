@@ -1534,15 +1534,28 @@ func (a *App) SyncConfigureRepo(repoURL, username, token, masterPassword string)
 	return result, err
 }
 
-// SyncConfigureRepoWebDAV configures a WebDAV snapshot share as sync backend.
-func (a *App) SyncConfigureRepoWebDAV(serverURL, basePath, username, password, masterPassword string) (*sync.SyncResult, error) {
+// SyncTestRemote probes a snapshot remote with form-provided values
+// (the add-repo dialog's test-connection button), without saving anything.
+func (a *App) SyncTestRemote(backend string, remote sync.RemoteConfig, secret string) error {
+	if a.syncService == nil {
+		return fmt.Errorf("sync service not initialized")
+	}
+	if !a.waitSyncReady(time.Second) {
+		return fmt.Errorf("sync service still initializing")
+	}
+	return a.syncService.TestRemote(backend, remote, secret)
+}
+
+// SyncConfigureRemote configures a snapshot remote (webdav/sftp/s3/smb)
+// as the sync backend.
+func (a *App) SyncConfigureRemote(backend string, remote sync.RemoteConfig, secret, masterPassword string) (*sync.SyncResult, error) {
 	if a.syncService == nil {
 		return nil, fmt.Errorf("sync service not initialized")
 	}
 	if !a.waitSyncReady(time.Second) {
 		return nil, fmt.Errorf("sync service still initializing")
 	}
-	result, err := a.syncService.ConfigureRepoWebDAV(serverURL, basePath, username, password, masterPassword)
+	result, err := a.syncService.ConfigureRepoRemote(backend, remote, secret, masterPassword)
 	if err == nil {
 		a.reloadStoresAfterSync()
 		a.emit("sync:completed")
@@ -1572,17 +1585,18 @@ func (a *App) SyncVerifyPassword(password, username, token string) error {
 	return a.syncService.VerifySyncPassword(password, username, token)
 }
 
-// SyncUpdateWebDAVPassword swaps the WebDAV credential only. The server,
+// SyncUpdateRemotePassword swaps the snapshot remote credential only. The
+// server,
 // remote folder and username are display-only in the edit dialog —
 // changing the sync target must go through delete + re-configure.
-func (a *App) SyncUpdateWebDAVPassword(password, masterPassword string) error {
+func (a *App) SyncUpdateRemotePassword(secret, masterPassword string) error {
 	if a.syncService == nil {
 		return fmt.Errorf("sync service not initialized")
 	}
 	if !a.waitSyncReady(time.Second) {
 		return fmt.Errorf("sync service still initializing")
 	}
-	return a.syncService.UpdateWebDAVPassword(password, masterPassword)
+	return a.syncService.UpdateRemotePassword(secret, masterPassword)
 }
 
 // SyncDeleteRepo removes the sync repository configuration.

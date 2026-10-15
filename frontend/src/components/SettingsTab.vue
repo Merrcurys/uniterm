@@ -807,12 +807,12 @@
             <div class="sync-card-body">
               <div class="repo-info">
                 <div class="repo-info-row">
-                  <span class="repo-label">{{ syncStore.config.backend === 'webdav' ? t('addRepo.serverUrl') : t('settings.syncRepoUrl') }}</span>
-                  <span class="repo-value">{{ syncStore.config.backend === 'webdav' ? syncStore.config.webdavServer : syncStore.config.repoUrl }}</span>
+                  <span class="repo-label">{{ syncStore.config.backend !== 'git' ? t('addRepo.serverUrl') : t('settings.syncRepoUrl') }}</span>
+                  <span class="repo-value">{{ syncStore.config.backend !== 'git' ? syncStore.config.remote?.server : syncStore.config.repoUrl }}</span>
                 </div>
                 <div class="repo-info-row">
                   <span class="repo-label">{{ t('settings.syncUsername') }}</span>
-                  <span class="repo-value">{{ syncStore.config.backend === 'webdav' ? syncStore.config.webdavUser : syncStore.config.username }}</span>
+                  <span class="repo-value">{{ syncStore.config.backend !== 'git' ? syncStore.config.remote?.user : syncStore.config.username }}</span>
                 </div>
               </div>
               <div class="repo-actions">
@@ -1680,8 +1680,8 @@ function openEditRepo() {
 
 // WebDAV configure leaves repoUrl empty, so "configured" depends on backend.
 const isSyncConfigured = computed(() =>
-  syncStore.config.backend === 'webdav'
-    ? !!syncStore.config.webdavServer
+  syncStore.config.backend !== 'git'
+    ? !!syncStore.config.remote?.server
     : !!syncStore.config.repoUrl
 )
 
