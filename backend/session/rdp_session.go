@@ -37,12 +37,15 @@ var (
 	procGetClientRect      = user32Dll.NewProc("GetClientRect")
 	procClientToScreen     = user32Dll.NewProc("ClientToScreen")
 	procPostMessageW       = user32Dll.NewProc("PostMessageW")
-	procFindWindowExW      = user32Dll.NewProc("FindWindowExW")
-	procSendMessageW       = user32Dll.NewProc("SendMessageW")
 	procGetSystemMetrics   = user32Dll.NewProc("GetSystemMetrics")
 	procGetWindowThreadPID = user32Dll.NewProc("GetWindowThreadProcessId")
 	procInvalidateRect     = user32Dll.NewProc("InvalidateRect")
 	procRedrawWindow       = user32Dll.NewProc("RedrawWindow")
+	procEnumWindows        = user32Dll.NewProc("EnumWindows")
+	procEnumChildWindows   = user32Dll.NewProc("EnumChildWindows")
+	procGetClassNameW      = user32Dll.NewProc("GetClassNameW")
+	procGetWindowTextW     = user32Dll.NewProc("GetWindowTextW")
+	procGetWindow          = user32Dll.NewProc("GetWindow")
 
 	// kernel32Dll is declared in local_session_windows.go (same package).
 	procGetCurrentProcID = kernel32Dll.NewProc("GetCurrentProcessId")
@@ -68,9 +71,10 @@ const (
 	RDW_ALLCHILDREN    = 0x0080
 	RDW_UPDATENOW      = 0x0100
 	WM_COMMAND         = 0x0111
-	BM_CLICK           = 0x00F5
 	IDYES              = 6
+	IDNO               = 7
 	IDOK               = 1
+	GW_OWNER           = 4
 	SM_CXSCREEN        = 0
 	SM_CYSCREEN        = 1
 )
@@ -233,24 +237,117 @@ func (s *RDPSession) SetParentHwnd(hwnd uintptr) {
 	s.parentHwnd = hwnd
 }
 
-// autoDismissSecurityDialogs polls for RDP security warning dialogs (e.g.
-// cert prompts or "do you want to connect" dialogs) and dismisses them.
-func (s *RDPSession) autoDismissSecurityDialogs(stop <-chan struct{}) {
-	dialogTitles := []string{
-		"远程桌面连接",
-		"远程桌面连接安全警告",
-		"Remote Desktop Connection",
-		"Remote Desktop Connection Security Warning",
-		"Windows 安全",
-		"Windows Security",
-		"安全警告",
-		"Security Warning",
+// ownerChain walks the GW_OWNER chain of a window, starting at the window
+// itself. Terminates on a zero owner and survives cycles (a broken owner
+// chain must not hang the dismiss poller); the chain is capped defensively.
+func ownerChain(start uintptr, getOwner func(uintptr) uintptr) []uintptr {
+	var chain []uintptr
+	seen := make(map[uintptr]bool)
+	for h := start; h != 0 && !seen[h] && len(chain) < 32; h = getOwner(h) {
+		seen[h] = true
+		chain = append(chain, h)
 	}
-	clsName, _ := windows.UTF16PtrFromString("#32770")
+	return chain
+}
 
+// dismissableDialog reports whether a #32770 dialog of our process belongs to
+// the RDP connect flow, judged purely by its GW_OWNER chain — locale
+// independent. The mstscax warning dialogs are owned either by the RDP child
+// window or directly by the main window (verified live: the
+// "网站正在尝试启动远程连接" redirection warning is owned by the WailsWebviewWindow,
+// not by the AtlAxWin child), so both owner chains are accepted. Dialogs
+// owned by anything else — including none — are left alone.
+func dismissableDialog(getOwner func(uintptr) uintptr, dlg, rdpHwnd, mainHwnd uintptr) bool {
+	if rdpHwnd != 0 && ownerChainContains(getOwner, dlg, rdpHwnd) {
+		return true
+	}
+	return mainHwnd != 0 && ownerChainContains(getOwner, dlg, mainHwnd)
+}
+
+// ownerChainContains reports whether the owner chain of start reaches target.
+func ownerChainContains(getOwner func(uintptr) uintptr, start, target uintptr) bool {
+	for _, h := range ownerChain(start, getOwner) {
+		if h == target {
+			return true
+		}
+	}
+	return false
+}
+
+// dialogDismissIDs returns the dialog control IDs to auto-click for a security
+// dialog. Control IDs are Windows constants, so this works on any OS language
+// — the previous implementation matched localized dialog titles and button
+// texts instead, which only covered Chinese and English. Dialogs containing an
+// edit control are credential prompts: auto-confirming one with a missing or
+// wrong password just re-shows it forever, so they are never touched (nil).
+func dialogDismissIDs(hasEditControl bool) []uintptr {
+	if hasEditControl {
+		return nil
+	}
+	return []uintptr{IDYES, IDOK, IDNO}
+}
+
+// autoDismissSecurityDialogs polls for RDP security warning dialogs (cert
+// prompts, redirection warnings, "do you want to connect" confirmations) and
+// dismisses them. Detection is locale-independent: any top-level dialog
+// (#32770) of this process whose GW_OWNER chain leads back to the RDP child
+// window. Localized title matching was tried first but matched only Chinese
+// and English titles, so on any other OS language the modal warning stayed
+// up, blocked the STA Connect call and froze the whole app. (issue #1146)
+func (s *RDPSession) autoDismissSecurityDialogs(stop <-chan struct{}) {
 	// Our own process ID, used to skip dialogs belonging to the system's mstsc.
 	pid, _, _ := procGetCurrentProcID.Call()
 	selfPID := uint32(pid)
+
+	// Enumerated top-level dialogs of this process (rebuilt on every tick).
+	var dialogs []uintptr
+	enumTop := windows.NewCallback(func(hwnd windows.HWND, _ uintptr) uintptr {
+		var wpid uint32
+		procGetWindowThreadPID.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&wpid)))
+		if wpid != selfPID {
+			return 1
+		}
+		var buf [64]uint16
+		n, _, _ := procGetClassNameW.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&buf[0])), 64)
+		if windows.UTF16ToString(buf[:n]) != "#32770" {
+			return 1
+		}
+		dialogs = append(dialogs, uintptr(hwnd))
+		return 1
+	})
+
+	// Edit-control probe shared by all dialogs; reports via hasEdit.
+	hasEdit := false
+	enumChildren := windows.NewCallback(func(hwnd windows.HWND, _ uintptr) uintptr {
+		var buf [64]uint16
+		n, _, _ := procGetClassNameW.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&buf[0])), 64)
+		if windows.UTF16ToString(buf[:n]) == "Edit" {
+			hasEdit = true
+			return 0 // stop
+		}
+		return 1
+	})
+
+	// Diagnostics + rate limiting, keyed by dialog handle: each dialog is
+	// logged and clicked at most once per window identity (re-clicked only
+	// after it was re-shown, i.e. a new handle appears; a dialog that stays
+	// up because the click did not take is retried after a grace period).
+	type dialogState struct {
+		logged     bool
+		lastClick  time.Time
+		credential bool
+	}
+	states := map[uintptr]*dialogState{}
+
+	getOwner := func(h uintptr) uintptr {
+		ret, _, _ := procGetWindow.Call(h, GW_OWNER)
+		return ret
+	}
+	windowTitle := func(h uintptr) string {
+		var buf [128]uint16
+		n, _, _ := procGetWindowTextW.Call(h, uintptr(unsafe.Pointer(&buf[0])), 128)
+		return windows.UTF16ToString(buf[:n])
+	}
 
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
@@ -260,47 +357,68 @@ func (s *RDPSession) autoDismissSecurityDialogs(stop <-chan struct{}) {
 		case <-stop:
 			return
 		case <-ticker.C:
-			for _, title := range dialogTitles {
-				tPtr, _ := windows.UTF16PtrFromString(title)
-				hwnd, _, _ := procFindWindowW.Call(
-					uintptr(unsafe.Pointer(clsName)),
-					uintptr(unsafe.Pointer(tPtr)),
-				)
-				if hwnd == 0 {
-					continue
-				}
+		}
 
-				// Only dismiss dialogs owned by our OWN process. The dialog class
-				// (#32770) and titles ("远程桌面连接" / "Windows 安全") are shared
-				// with the system's mstsc; without this filter we would repeatedly
-				// close mstsc's own password/security prompts, causing them to
-				// flicker and re-open. (issue #348)
-				var dlgPID uint32
-				procGetWindowThreadPID.Call(hwnd, uintptr(unsafe.Pointer(&dlgPID)))
-				if dlgPID != selfPID {
-					continue
-				}
+		s.mu.Lock()
+		rdpHwnd := s.hwnd
+		mainHwnd := s.parentHwnd
+		s.mu.Unlock()
+		if rdpHwnd == 0 {
+			return
+		}
 
-				// Dismiss via standard dialog button IDs
-				procPostMessageW.Call(hwnd, WM_COMMAND, IDYES, 0)
-				procPostMessageW.Call(hwnd, WM_COMMAND, IDOK, 0)
-				procPostMessageW.Call(hwnd, WM_COMMAND, IDYES+1, 0) // IDNO sometimes maps to 7
+		dialogs = dialogs[:0]
+		ret, _, _ := procEnumWindows.Call(enumTop, 0)
+		if ret == 0 {
+			continue
+		}
 
-				// Also try clicking buttons directly (Windows 11 may use different labels)
-				for _, btnText := range []string{
-					"是(&Y)", "是", "Yes", "&Yes",
-					"连接(&C)", "连接(&N)", "连接", "Connect", "&Connect",
-					"确认", "确认(&Y)", "确认(&O)",
-					"确定", "确定(&O)", "OK", "&OK",
-					"继续", "继续(&C)", "Continue", "&Continue",
-				} {
-					btnPtr, _ := windows.UTF16PtrFromString(btnText)
-					btnHwnd, _, _ := procFindWindowExW.Call(hwnd, 0, 0, uintptr(unsafe.Pointer(btnPtr)))
-					if btnHwnd != 0 {
-						procSendMessageW.Call(btnHwnd, BM_CLICK, 0, 0)
-						break
-					}
+		for _, dlg := range dialogs {
+			st := states[dlg]
+			if st == nil {
+				st = &dialogState{}
+				states[dlg] = st
+			}
+
+			// Only dialogs owned by the RDP child window or directly by the
+			// main window belong to the connect flow. Other dialogs of our
+			// process — e.g. the system open-with dialog — must not be
+			// dismissed, and unlike the title list this check cannot confuse
+			// them.
+			if !dismissableDialog(getOwner, dlg, rdpHwnd, mainHwnd) {
+				if !st.logged {
+					st.logged = true
+					log.Writef("[RDP-dialogs] ignoring dialog %#x %q (not owned by the RDP window)", dlg, windowTitle(dlg))
 				}
+				continue
+			}
+
+			// Credential prompts (any edit control) are never auto-confirmed.
+			hasEdit = false
+			procEnumChildWindows.Call(dlg, enumChildren, 0)
+			if hasEdit {
+				if !st.logged {
+					st.logged = true
+					st.credential = true
+					log.Writef("[RDP-dialogs] credential dialog %#x %q: not auto-dismissing", dlg, windowTitle(dlg))
+				}
+				continue
+			}
+
+			// Log the dialog once so non-matching cases can be diagnosed from
+			// the log without reproducing locally.
+			if !st.logged {
+				st.logged = true
+				log.Writef("[RDP-dialogs] dismissing security dialog %#x %q", dlg, windowTitle(dlg))
+			}
+			// Re-dismiss at a slow pace if the dialog is still up; the first
+			// click usually closes it and further posts are no-ops.
+			if !st.lastClick.IsZero() && time.Since(st.lastClick) < time.Second {
+				continue
+			}
+			st.lastClick = time.Now()
+			for _, id := range dialogDismissIDs(false) {
+				procPostMessageW.Call(dlg, WM_COMMAND, id, 0)
 			}
 		}
 	}
