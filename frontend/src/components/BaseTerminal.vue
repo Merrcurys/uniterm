@@ -176,7 +176,7 @@ import {
 import { getXtermTheme } from '../composables/useTerminal'
 import { resolveXtermBackground, applyTerminalBgVar, resolveTerminalThemeName } from '../composables/useTerminalTheme'
 import { stripCursorBlink } from '../utils/cursor'
-import { applyBackspaceKey } from '../utils/backspaceKey'
+import { applyBackspaceKey } from '../utils/terminalOptions'
 import { formatFontFamily } from '../utils/formatFontFamily'
 import { normalizePastedText, pasteWithScroll } from '../utils/terminalPaste'
 import {
