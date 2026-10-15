@@ -20,6 +20,9 @@
 - Shells: the Git Bash path is configurable in settings for non-default install locations, and scoop-installed Git Bash is detected automatically. (@chris-edstrom)
 - Workspace: a group can be selected when saving / editing a workspace so workspaces can be organized into groups, and new creation entries make saving one reachable from more places.
 - Mobile: options that only apply on desktop platforms are hidden on mobile, keeping the interface uncluttered on small screens; detail drawers no longer overflow the window bounds, and the database row dialog columns are rebalanced for narrow windows.
+- Start page: sections (favorites / recent / groups) can be hidden and reordered from the top-right menu.
+- S3: large objects download much faster with parallel ranged GETs, falling back to a single stream on endpoints that don't support ranges.
+- Tabs: the tab bar's plus button and the new-tab shortcut get a configurable default action — the start page (default) or a local terminal using the default shell.
 
 **Bug Fixes**
 - AI: fixes requests to the OpenCode Zen Go endpoint missing the required `x-opencode-session` header — the session ID is now sent so the server can correctly track the conversation session. (@andreafunicelli)
@@ -34,6 +37,9 @@
 - App: refuses to migrate the data directory into itself (nesting it under its own subfolder), which previously corrupted the directory layout.
 - Database: fixes binary Guid columns rendering as garbled bytes in the result grid — SQL Server `UNIQUEIDENTIFIER` and Oracle `RAW(16)` columns (the form EF Core / ABP write Guid keys in) now display as formatted GUID text, and other non-text binary values render as `0x`-prefixed hex. (@IBRAHIMELAMRABET)
 - Shells: scoop-installed Git Bash is labeled separately from system Git Bash, so the two entries in the shell list are distinguishable.
+- Terminal: fixes full-screen TUIs (ncurses menus, ...) rendering incorrectly under heavy load — no more corrupted output or leftover content after exiting.
+- Credentials: fixes the credential store failing to unlock after the data directory is moved or copied, and a possible lockout after switching the encryption mode or changing the master password.
+- UI: fixes a black flash at startup when a light theme is configured.
 
 Thanks to @surenwuyuwuqiu, @dungvv, @andreafunicelli, @chris-edstrom and @IBRAHIMELAMRABET for their contributions to this release.
 
@@ -55,6 +61,9 @@ Thanks to @surenwuyuwuqiu, @dungvv, @andreafunicelli, @chris-edstrom and @IBRAHI
 - Shell：Git Bash 路径可在设置中配置以支持非默认安装位置，并自动检测 scoop 安装的 Git Bash。(@chris-edstrom)
 - 工作区：保存 / 编辑工作区时可选择分组，便于将工作区归入分组管理；同时新增了创建入口，保存工作区更容易触达。
 - 移动端：在移动平台上隐藏仅桌面适用的选项，小屏界面更清爽；详情抽屉不再超出窗口边界，数据库行对话框列宽为窄窗口重新分配。
+- 起始页：各区块（收藏 / 最近 / 分组）可隐藏与排序，设置入口在起始页右上角。
+- S3：大对象下载提速——改为并发分段下载，不支持的端点自动回退单流。
+- 标签页：标签栏加号按钮与新标签快捷键的默认行为可配置——可选打开起始页（默认）或使用默认 Shell 的本地终端。
 
 **修复**
 - AI：修复请求 OpenCode Zen 的 Go 端点时缺少必需的 `x-opencode-session` 会话头的问题——现在会传入会话 ID，服务端可正确关联同一会话。(@andreafunicelli)
@@ -69,6 +78,9 @@ Thanks to @surenwuyuwuqiu, @dungvv, @andreafunicelli, @chris-edstrom and @IBRAHI
 - 应用：拒绝将数据目录迁移到其自身内部（嵌套在自身子目录下），此前会破坏目录结构。
 - 数据库：修复二进制 Guid 列在结果网格中显示为乱码的问题——SQL Server 的 `UNIQUEIDENTIFIER` 与 Oracle 的 `RAW(16)` 列（EF Core / ABP 写入 Guid 主键的形式）现按格式化 GUID 文本显示，其他非文本二进制值以 `0x` 前缀的十六进制显示。(@IBRAHIMELAMRABET)
 - Shell：scoop 安装的 Git Bash 与系统 Git Bash 分开标注，shell 列表中两者可区分。
+- 终端：修复负载高时全屏 TUI（ncurses 菜单等）界面显示错乱、退出后残留内容的问题。
+- 凭据：修复数据目录移动或复制后凭据存储无法恢复解锁的问题，以及切换加密模式 / 修改主密码后可能锁死存储的问题。
+- 界面：修复浅色主题下启动时闪黑的问题。
 
 感谢 @surenwuyuwuqiu、@dungvv、@andreafunicelli、@chris-edstrom 和 @IBRAHIMELAMRABET 对本版本的贡献。
 
