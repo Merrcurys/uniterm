@@ -16,6 +16,8 @@ import (
 	"github.com/ys-ll/uniterm/backend/k8s"
 	"github.com/ys-ll/uniterm/backend/log"
 	"github.com/ys-ll/uniterm/backend/mcp"
+	"github.com/ys-ll/uniterm/backend/mcpclient"
+	"github.com/ys-ll/uniterm/backend/mcpjob"
 	"github.com/ys-ll/uniterm/backend/platform"
 	"github.com/ys-ll/uniterm/backend/session"
 	"github.com/ys-ll/uniterm/backend/store"
@@ -106,6 +108,16 @@ type App struct {
 	mcpTokenCacheMu    stdsync.Mutex
 	mcpTokenCache      map[string]mcp.TokenInfo
 	mcpTokenCacheMtime time.Time
+
+	// MCP client (uniTerm connects to external MCP servers). Separate from the
+	// mcpServer above: that one exposes uniTerm to external agents; this one
+	// feeds external tools into the built-in AI panel. Lazily created.
+	mcpClient     *mcpclient.Manager
+	mcpClientOnce stdsync.Once
+	// Unified async foreground-job registry (mcp uniterm_exec mode=foreground).
+	// Background non-PTY exec stays on the session mcpExec path.
+	jobs    *mcpjob.Registry
+	jobOnce stdsync.Once
 
 	// session objects and the log file spans all of them. sessionToPanel
 	// tracks the current session→panel binding so emitData can look up
@@ -389,6 +401,11 @@ func (a *App) initStores(dataDir string, upgrade bool) {
 		log.Writef("mcp: start failed: %v", err)
 		a.emit("app:startup-error", "MCP server: "+err.Error())
 	}
+
+	// MCP client: connect persisted external servers so their tools are
+	// available to the built-in AI panel. Failures are logged per-server; one
+	// bad external server never blocks startup.
+	a.StartMCPClient()
 
 	// Raise the window to the foreground once, shortly after launch. On Windows a
 	// relaunched instance can otherwise land behind other windows; the short delay
@@ -760,6 +777,9 @@ func (a *App) shutdown() {
 	a.unsubclassMainWindow()
 	if a.mcpServer != nil {
 		a.mcpServer.Stop()
+	}
+	if a.mcpClient != nil {
+		a.mcpClient.CloseAll()
 	}
 	if a.tunnelService != nil {
 		a.tunnelService.Shutdown()

@@ -61,6 +61,7 @@ func (a *App) ensureMCPServer() *mcp.Server {
 			ResolveToken:     a.mcpResolveToken,
 			FileSession:      a.mcpFileSession,
 			ResolveLocalPath: a.mcpResolveLocalPath,
+			Foreground:       a,
 		}
 		a.mcpServer = mcp.NewServer(env)
 	})
