@@ -69,6 +69,7 @@
                 :min="10"
                 :max="18"
                 :step="1"
+                controls-position="right"
                 @change="settingsStore.save()"
               />
             </div>
@@ -477,6 +478,7 @@
                 v-model="settingsStore.settings.terminal.fontSize"
                 :min="8"
                 :max="32"
+                controls-position="right"
                 @change="settingsStore.save()"
               />
             </div>
@@ -671,25 +673,6 @@
             </div>
           </div>
 
-          <div class="setting-card">
-            <div class="setting-info">
-              <div class="setting-title">{{ t('settings.defaultTermType') }}</div>
-              <div class="setting-desc">{{ t('settings.defaultTermTypeDesc') }}</div>
-            </div>
-            <div class="setting-control">
-              <el-select v-model="settingsStore.settings.defaultTermType" @change="settingsStore.save()">
-                <el-option :label="t('settings.defaultTermTypeAuto')" value="" />
-                <el-option label="xterm-256color" value="xterm-256color" />
-                <el-option label="xterm" value="xterm" />
-                <el-option label="vt100" value="vt100" />
-                <el-option label="vt220" value="vt220" />
-                <el-option label="vt320" value="vt320" />
-                <el-option label="ansi" value="ansi" />
-                <el-option label="linux" value="linux" />
-              </el-select>
-            </div>
-          </div>
-
           <div v-if="!isMobile" class="setting-card">
             <div class="setting-info">
               <div class="setting-title">{{ t('settings.gitBashPath') }}</div>
@@ -716,6 +699,7 @@
                 :min="100"
                 :max="50000"
                 :step="100"
+                controls-position="right"
                 @change="settingsStore.save()"
               />
             </div>
@@ -1226,6 +1210,7 @@
                 v-model="settingsStore.settings.ai.maxTurns"
                 :min="0"
                 :max="100"
+                controls-position="right"
                 @change="settingsStore.save()"
               />
             </div>
@@ -1292,7 +1277,7 @@
               <div class="setting-title">{{ t('settings.mcpPort') }}</div>
             </div>
             <div class="setting-control">
-              <el-input-number v-model="mcpPort" :min="1" :max="65535" @change="saveMcp()" />
+              <el-input-number v-model="mcpPort" :min="1" :max="65535" controls-position="right" @change="saveMcp()" />
             </div>
           </div>
 

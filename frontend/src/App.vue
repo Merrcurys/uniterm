@@ -238,7 +238,6 @@ import { unregisterTransferRoute } from './services/transferTaskCenter'
 import type { ConnectionConfig } from './types/session'
 import { Application, Clipboard, Events } from '@wailsio/runtime'
 import { parseQuickConnect } from './utils/quickConnect'
-import { withDefaultTermType } from './utils/terminalOptions'
 import { getShellLabel as getShellLabelBase, parseWslFromShell } from './utils/shellLabel'
 import { reconnectFileTransferPanel } from './composables/usePanelReconnect'
 import { launchConnection, launchFileBrowser, launchMonitor, launchWslFileBrowser, launchContainerFileBrowser, persistConnection, configureLauncher } from './composables/connectionLauncher'
@@ -1698,7 +1697,7 @@ async function connectTerminalSession(config: ConnectionConfig, persist: boolean
     config.initialRows = size.rows
   }
   try {
-    await SessionStart(sessionId, withDefaultTermType(config, settingsStore.settings.defaultTermType))
+    await SessionStart(sessionId, config)
   } catch (e) {
     console.error('Failed to start session:', e)
     // Session is registered in the backend but never connected — close it
@@ -1921,7 +1920,7 @@ async function createLocalTerminal(shellPath?: string, keepOpen?: boolean) {
       config.initialRows = size.rows
     }
     try {
-      await SessionStart(info.id, withDefaultTermType(config, settingsStore.settings.defaultTermType))
+      await SessionStart(info.id, config)
     } catch (e) {
       console.error('Failed to start local session:', e)
       CloseSession(info.id).catch(() => {})

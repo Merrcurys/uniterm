@@ -389,7 +389,6 @@ function mergeSettings(loaded: AppSettings): AppSettings {
     sftpTransferPanelVisible: loaded.sftpTransferPanelVisible ?? DEFAULT_SETTINGS.sftpTransferPanelVisible,
     customTerminalThemes: loaded.customTerminalThemes || [],
     defaultLocalShell: loaded.defaultLocalShell ?? DEFAULT_SETTINGS.defaultLocalShell,
-    defaultTermType: loaded.defaultTermType ?? DEFAULT_SETTINGS.defaultTermType,
     gitBashPath: loaded.gitBashPath ?? DEFAULT_SETTINGS.gitBashPath,
     tabCloseButton: loaded.tabCloseButton || DEFAULT_SETTINGS.tabCloseButton,
     showTabShortcutHints: loaded.showTabShortcutHints ?? DEFAULT_SETTINGS.showTabShortcutHints,
