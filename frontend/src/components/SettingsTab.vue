@@ -69,6 +69,7 @@
                 :min="10"
                 :max="18"
                 :step="1"
+                controls-position="right"
                 @change="settingsStore.save()"
               />
             </div>
@@ -477,6 +478,7 @@
                 v-model="settingsStore.settings.terminal.fontSize"
                 :min="8"
                 :max="32"
+                controls-position="right"
                 @change="settingsStore.save()"
               />
             </div>
@@ -671,25 +673,6 @@
             </div>
           </div>
 
-          <div class="setting-card">
-            <div class="setting-info">
-              <div class="setting-title">{{ t('settings.defaultTermType') }}</div>
-              <div class="setting-desc">{{ t('settings.defaultTermTypeDesc') }}</div>
-            </div>
-            <div class="setting-control">
-              <el-select v-model="settingsStore.settings.defaultTermType" @change="settingsStore.save()">
-                <el-option :label="t('settings.defaultTermTypeAuto')" value="" />
-                <el-option label="xterm-256color" value="xterm-256color" />
-                <el-option label="xterm" value="xterm" />
-                <el-option label="vt100" value="vt100" />
-                <el-option label="vt220" value="vt220" />
-                <el-option label="vt320" value="vt320" />
-                <el-option label="ansi" value="ansi" />
-                <el-option label="linux" value="linux" />
-              </el-select>
-            </div>
-          </div>
-
           <div v-if="!isMobile" class="setting-card">
             <div class="setting-info">
               <div class="setting-title">{{ t('settings.gitBashPath') }}</div>
@@ -716,6 +699,7 @@
                 :min="100"
                 :max="50000"
                 :step="100"
+                controls-position="right"
                 @change="settingsStore.save()"
               />
             </div>
@@ -949,28 +933,29 @@
         <el-button type="primary" @click="openTunnelDialog()">{{ t('tunnels.addTunnel') }}</el-button>
         <el-table :data="tunnelStore.tunnels" size="small" style="margin-top: 0.75rem">
           <el-table-column prop="name" :label="t('tunnels.name')" />
-          <el-table-column :label="t('tunnels.modeCol')" :width="uiPx(100)">
+          <el-table-column :label="t('tunnels.modeCol')" :width="uiPx(150)">
             <template #default="{ row }">{{ modeName(row.mode) }}</template>
           </el-table-column>
           <el-table-column :label="t('tunnels.listenCol')" :width="uiPx(120)">
             <template #default="{ row }">:{{ effPort(row) }}</template>
           </el-table-column>
-          <el-table-column :label="t('tunnels.statusCol')" :width="uiPx(120)">
+          <el-table-column :label="t('tunnels.statusCol')" :width="uiPx(160)">
             <template #default="{ row }">
               <el-switch
-                :model-value="statusOf(row.id) === 'running'"
+                :model-value="tunnelStore.isActive(row.id)"
+                :title="tunnelStore.isActive(row.id) ? t('tunnels.stop') : t('tunnels.start')"
                 @change="toggleRun(row)"
-                :loading="togglingTunnelId === row.id"
               />
+              <div :title="tunnelStore.statusTitle(row.id)">{{ tunnelStore.statusLabel(row.id) }}</div>
             </template>
           </el-table-column>
           <el-table-column :label="t('common.actions')" :width="uiPx(160)">
             <template #default="{ row }">
-              <!-- Editing a running tunnel would desync the form from what's
-                   actually running; edits require a stop first. -->
+              <!-- Connecting and reconnecting tunnels must also stop before edits. -->
               <el-button
                 size="small"
-                :disabled="tunnelStore.statusOf(row.id) === 'running'"
+                :disabled="tunnelStore.isActive(row.id)"
+                :title="tunnelStore.isActive(row.id) ? t('tunnels.editDisabledActive') : undefined"
                 @click="openTunnelDialog(row)"
               >{{ t('common.edit') }}</el-button>
               <el-button size="small" type="danger" @click="removeTunnel(row)">{{ t('common.delete') }}</el-button>
@@ -1225,6 +1210,7 @@
                 v-model="settingsStore.settings.ai.maxTurns"
                 :min="0"
                 :max="100"
+                controls-position="right"
                 @change="settingsStore.save()"
               />
             </div>
@@ -1291,7 +1277,7 @@
               <div class="setting-title">{{ t('settings.mcpPort') }}</div>
             </div>
             <div class="setting-control">
-              <el-input-number v-model="mcpPort" :min="1" :max="65535" @change="saveMcp()" />
+              <el-input-number v-model="mcpPort" :min="1" :max="65535" controls-position="right" @change="saveMcp()" />
             </div>
           </div>
 
@@ -2692,7 +2678,6 @@ async function toggleProxy(row: Proxy, v: boolean) {
 const tunnelStore = useTunnelStore()
 const tunnelDialogVisible = ref(false)
 const editingTunnelId = ref<string | undefined>(undefined)
-const togglingTunnelId = ref<string | undefined>(undefined)
 
 // ── Sidebar tab visibility ──
 // Writable computed over AppSettings.sidebarTabs. "connections" never appears
@@ -2713,6 +2698,7 @@ function onSidebarTabsChange() {
   settingsStore.save()
 }
 function openTunnelDialog(t?: Tunnel) {
+  if (t && tunnelStore.isActive(t.id)) return
   editingTunnelId.value = t?.id
   tunnelDialogVisible.value = true
 }
@@ -2721,23 +2707,15 @@ async function removeTunnel(row: Tunnel) {
 }
 const modeName = (m: TunnelMode) => t(`tunnels.mode.${m}`)
 const effPort = (t: Tunnel) => tunnelStore.states[t.id]?.localPort || t.listenPort
-const statusOf = (id: string) => tunnelStore.statusOf(id)
 async function toggleRun(row: Tunnel) {
-  if (statusOf(row.id) === 'running') {
-    togglingTunnelId.value = row.id
+  if (tunnelStore.isActive(row.id)) {
     await tunnelStore.stop(row.id)
-    togglingTunnelId.value = undefined
   } else {
     // Exit connection without saved credentials: prompt for user/password and
     // pass them inline (backend fills only empty fields). Cancel aborts.
     const creds = await resolveTunnelCredentials(row.sshConnId)
     if (!creds) return
-    togglingTunnelId.value = row.id
-    const st = await tunnelStore.start(row.id, creds.user, creds.password)
-    togglingTunnelId.value = undefined
-    if (st.status === 'error') {
-      msg.error(st.error || t('tunnels.startFailed'))
-    }
+    await tunnelStore.start(row.id, creds.user, creds.password)
   }
 }
 

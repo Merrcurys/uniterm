@@ -1437,6 +1437,9 @@ export namespace session {
 	    targetPort?: number;
 	    upstream?: SocksProxy;
 	    autoStart?: boolean;
+	    autoReconnect?: boolean;
+	    reconnectInterval?: number;
+	    reconnectJitter?: number;
 	    groupId?: string;
 	    sortOrder?: number;
 	
@@ -1456,6 +1459,9 @@ export namespace session {
 	        this.targetPort = source["targetPort"];
 	        this.upstream = this.convertValues(source["upstream"], SocksProxy);
 	        this.autoStart = source["autoStart"];
+	        this.autoReconnect = source["autoReconnect"];
+	        this.reconnectInterval = source["reconnectInterval"];
+	        this.reconnectJitter = source["reconnectJitter"];
 	        this.groupId = source["groupId"];
 	        this.sortOrder = source["sortOrder"];
 	    }
@@ -2282,4 +2288,3 @@ export namespace update {
 	}
 
 }
-
