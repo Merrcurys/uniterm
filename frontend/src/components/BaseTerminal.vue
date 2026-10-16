@@ -1,6 +1,7 @@
 <template>
   <div
     class="base-terminal"
+    :data-terminal-session-id="props.sessionId"
     :id="terminalDropId"
     data-file-drop-target
     @dragover.prevent="onDragOver"

@@ -155,7 +155,7 @@
     <DataDirDialog v-model:visible="dataDirVisible" :first-run="credStore.firstRun || credStore.dataDirInfo.firstRun" @done="onDataDirDone" />
     <EncryptionModeDialog v-model:visible="encryptVisible" :existing-secrets="credStore.status.existingSecrets" @done="onEncryptDone" />
     <CredentialUnlockDialog v-model:visible="unlockVisible" @done="onUnlockDone" @reset="onReset" />
-    <MobileKeyBar v-if="keyBarSessionId" :session-id="keyBarSessionId" />
+    <MobileKeyBar v-if="keyBarSessionId" :key="keyBarSessionId" :session-id="keyBarSessionId" />
   </div>
   </el-config-provider>
 </template>
@@ -295,20 +295,24 @@ const sessionStore = useSessionStore()
 // Soft keyboards lack Esc/Tab/arrows/Ctrl combos. The bar floats at the bottom
 // of .app-container — directly above the soft keyboard, because MainActivity
 // pads the app root by the IME inset. It shows only while the keyboard is up
-// from a terminal textarea focus and an SSH-family session is connected.
+// from a terminal textarea focus and its session is connected.
 const isMobile = isMobilePlatform()
-const terminalFocusActive = ref(false)
+const focusedTerminalSessionId = ref<string | null>(null)
+
+function updateFocusedTerminal(el: HTMLElement | null) {
+  focusedTerminalSessionId.value = el?.classList?.contains('xterm-helper-textarea')
+    ? el.closest<HTMLElement>('[data-terminal-session-id]')?.dataset.terminalSessionId || null
+    : null
+}
 
 function onDocFocusIn(e: FocusEvent) {
-  const el = e.target as HTMLElement | null
-  terminalFocusActive.value = !!el?.classList?.contains('xterm-helper-textarea')
+  updateFocusedTerminal(e.target as HTMLElement | null)
 }
 function onDocFocusOut() {
   // Focus may move between xterm instances or to nothing; re-check after the
   // focusin/focusout pair settles.
   requestAnimationFrame(() => {
-    const el = document.activeElement as HTMLElement | null
-    terminalFocusActive.value = !!el?.classList?.contains('xterm-helper-textarea')
+    updateFocusedTerminal(document.activeElement as HTMLElement | null)
   })
 }
 if (isMobile) {
@@ -348,15 +352,10 @@ onUnmounted(() => {
 })
 
 const keyBarSessionId = computed(() => {
-  if (!isMobile || !terminalFocusActive.value) return null
-  const tab = activeTab.value
-  if (!tab || tab.type !== 'terminal') return null
-  const panel = panelStore.getPanel(tab.panelId)
-  if (!panel?.sessionId) return null
-  // local/wsl panels have no need for the escape-sequence bar
-  if (panel.type === 'local' || panel.type === 'wsl') return null
-  if (sessionStore.getStatus(panel.sessionId) !== 'connected') return null
-  return panel.sessionId
+  const sessionId = focusedTerminalSessionId.value
+  if (!isMobile || !sessionId) return null
+  if (sessionStore.getStatus(sessionId) !== 'connected') return null
+  return sessionId
 })
 const { duplicateSession } = useDuplicateSession()
 const aiStore = useAIStore()
