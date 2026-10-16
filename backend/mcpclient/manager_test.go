@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/ys-ll/uniterm/backend/store"
 )
 
 // fakeSession stands in for *mcp.ClientSession in tests; it returns a fixed tool
@@ -48,28 +49,16 @@ func TestQualifiedName(t *testing.T) {
 	}
 }
 
-func TestConfigValidate(t *testing.T) {
-	if err := (ClientConfig{Name: "x", Transport: TransportStdio}).Validate(); err == nil {
-		t.Error("stdio without command should fail")
-	}
-	if err := (ClientConfig{Name: "x", Transport: TransportStreamableHTTP, URL: "http://x"}).Validate(); err != nil {
-		t.Errorf("valid http config: %v", err)
-	}
-	if err := (ClientConfig{Name: "x", Transport: "ftp"}).Validate(); err == nil {
-		t.Error("unknown transport should fail")
-	}
-}
-
 func TestManagerListAndCall(t *testing.T) {
 	fs := &fakeSession{tools: []*mcp.Tool{
 		{Name: "read_file", Description: "read a file", InputSchema: map[string]any{"type": "object"}},
 		{Name: "write_file", Description: "write a file"},
 	}}
-	m := NewManager(NewStore(t.TempDir()))
-	m.dial = func(ctx context.Context, cfg ClientConfig) (Session, error) { return fs, nil }
+	m := NewManager(store.NewMCPClientStore(t.TempDir()))
+	m.dial = func(ctx context.Context, cfg store.MCPClientConfig) (Session, error) { return fs, nil }
 
 	ctx := context.Background()
-	m.ensureConn(ctx, ClientConfig{Name: "fs", Transport: TransportStdio, Command: "npx", Enabled: true})
+	m.ensureConn(ctx, store.MCPClientConfig{Name: "fs", Transport: store.MCPTransportStdio, Command: "npx", Enabled: true})
 
 	tools := m.ListTools()
 	if len(tools) != 2 {
@@ -98,43 +87,66 @@ func TestManagerListAndCall(t *testing.T) {
 
 func TestManagerRecordsDialFailure(t *testing.T) {
 	wantErr := errors.New("boom")
-	m := NewManager(NewStore(t.TempDir()))
-	m.dial = func(ctx context.Context, cfg ClientConfig) (Session, error) { return nil, wantErr }
-	m.ensureConn(context.Background(), ClientConfig{Name: "bad", Transport: TransportStdio, Command: "x", Enabled: true})
+	m := NewManager(store.NewMCPClientStore(t.TempDir()))
+	m.dial = func(ctx context.Context, cfg store.MCPClientConfig) (Session, error) { return nil, wantErr }
+	m.ensureConn(context.Background(), store.MCPClientConfig{Name: "bad", Transport: store.MCPTransportStdio, Command: "x", Enabled: true})
 
 	if tools := m.ListTools(); len(tools) != 0 {
 		t.Errorf("failed conn must not list tools, got %d", len(tools))
 	}
-	statuses := m.Statuses([]ClientConfig{{Name: "bad", Enabled: true}})
+	statuses := m.Statuses([]store.MCPClientConfig{{Name: "bad", Enabled: true}})
 	if len(statuses) != 1 || statuses[0].Connected || statuses[0].Error == "" {
 		t.Errorf("statuses=%+v", statuses)
 	}
 }
 
-func TestStoreRoundTrip(t *testing.T) {
-	s := NewStore(t.TempDir())
-	in := []ClientConfig{
-		{Name: "B", Transport: TransportStdio, Command: "npx", Enabled: true},
-		{Name: "a", Transport: TransportSSE, URL: "http://x/sse", Enabled: false},
+// TestInMemoryRoundTrip connects the manager's dialer to a real SDK server over
+// in-memory transports, lists tools, and calls one — proving the SDK wiring
+// (ListTools/CallTool) works, not just the fake session.
+func TestInMemoryRoundTrip(t *testing.T) {
+	ctx := context.Background()
+
+	echo := func(_ context.Context, _ *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "echo:hi"}}}, nil
 	}
-	if err := s.Save(in); err != nil {
+
+	server := mcp.NewServer(&mcp.Implementation{Name: "test-server", Version: "1.0.0"}, nil)
+	server.AddTool(&mcp.Tool{
+		Name:        "ping",
+		Description: "echo back",
+		InputSchema: map[string]any{"type": "object"},
+	}, echo)
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "uniterm-test", Version: "1.0.0"}, nil)
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+
+	if _, err := server.Connect(ctx, serverTransport, nil); err != nil {
 		t.Fatal(err)
 	}
-	got, err := s.Load()
+	cs, err := client.Connect(ctx, clientTransport, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 {
-		t.Fatalf("want 2, got %d", len(got))
+	defer cs.Close()
+
+	m := NewManager(store.NewMCPClientStore(t.TempDir()))
+	m.dial = func(context.Context, store.MCPClientConfig) (Session, error) { return cs, nil }
+
+	m.ensureConn(ctx, store.MCPClientConfig{Name: "echo", Transport: store.MCPTransportStdio, Enabled: true})
+
+	tools := m.ListTools()
+	if len(tools) != 1 || tools[0].Name != "ping" {
+		t.Fatalf("tools=%+v", tools)
 	}
-	// Saved sorted by name.
-	if got[0].Name != "a" || got[1].Name != "B" {
-		t.Errorf("not sorted: %s, %s", got[0].Name, got[1].Name)
+	if tools[0].QualifiedName != "mcp__echo__ping" {
+		t.Fatalf("qualified=%q", tools[0].QualifiedName)
 	}
-	// Missing file → empty, not error.
-	empty := NewStore(t.TempDir())
-	list, err := empty.Load()
-	if err != nil || len(list) != 0 {
-		t.Errorf("missing file: list=%v err=%v", list, err)
+
+	out, err := m.CallTool(ctx, "mcp__echo__ping", map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "echo:hi" {
+		t.Fatalf("out=%q", out)
 	}
 }

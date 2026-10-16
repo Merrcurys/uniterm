@@ -17,7 +17,6 @@ import (
 	"github.com/ys-ll/uniterm/backend/log"
 	"github.com/ys-ll/uniterm/backend/mcp"
 	"github.com/ys-ll/uniterm/backend/mcpclient"
-	"github.com/ys-ll/uniterm/backend/mcpjob"
 	"github.com/ys-ll/uniterm/backend/platform"
 	"github.com/ys-ll/uniterm/backend/session"
 	"github.com/ys-ll/uniterm/backend/store"
@@ -115,12 +114,21 @@ type App struct {
 	// MCP client (uniTerm connects to external MCP servers). Separate from the
 	// mcpServer above: that one exposes uniTerm to external agents; this one
 	// feeds external tools into the built-in AI panel. Lazily created.
-	mcpClient     *mcpclient.Manager
-	mcpClientOnce stdsync.Once
-	// Unified async foreground-job registry (mcp uniterm_exec mode=foreground).
-	// Background non-PTY exec stays on the session mcpExec path.
-	jobs    *mcpjob.Registry
+	mcpClient      *mcpclient.Manager
+	mcpClientStore *store.MCPClientStore
+	mcpClientOnce  stdsync.Once
+	// Unified async foreground-job registry — the single execution engine for
+	// both the MCP server's foreground toolset and the built-in AI panel's
+	// execute path. Background non-PTY exec stays on the session mcpExec path.
+	jobs    *mcp.Registry
 	jobOnce stdsync.Once
+
+	// Session-lifetime screen emulators backing CaptureScreen (the MCP
+	// uniterm_capture tool and the frontend's collect-output fallback). One
+	// per session, attached before connecting; fed via additive data
+	// taps, removed when the session disconnects.
+	captureMu stdsync.Mutex
+	captures  map[string]*sessionCapture
 
 	// session objects and the log file spans all of them. sessionToPanel
 	// tracks the current session→panel binding so emitData can look up
@@ -324,6 +332,7 @@ func (a *App) initStores(dataDir string, upgrade bool) {
 	} else {
 		a.aiConfigStore = acs
 	}
+	a.mcpClientStore = store.NewMCPClientStore(dataDir)
 
 	is, err := store.NewIdentityStore(dataDir)
 	if err != nil {
@@ -531,6 +540,9 @@ func (a *App) initCredentials(dataDir string, upgrade bool) {
 	}
 	if a.proxyStore != nil {
 		a.proxyStore.SetPasswordStore(cred)
+	}
+	if a.mcpClientStore != nil {
+		a.mcpClientStore.SetPasswordStore(cred)
 	}
 }
 
@@ -2478,7 +2490,7 @@ func (a *App) ResetCredentials() error {
 // that once stayed under the old key) fails the rekey loudly instead of
 // being silently skipped.
 func (a *App) reencryptAll(cs *credentials.Store, oldKey, newKey []byte) error {
-	if a.connectionStore == nil || a.settingsStore == nil || a.identityStore == nil || a.proxyStore == nil || a.aiConfigStore == nil {
+	if a.connectionStore == nil || a.settingsStore == nil || a.identityStore == nil || a.proxyStore == nil || a.aiConfigStore == nil || a.mcpClientStore == nil {
 		return errors.New("stores not initialized")
 	}
 	conns, err := a.connectionStore.Load()
@@ -2501,12 +2513,17 @@ func (a *App) reencryptAll(cs *credentials.Store, oldKey, newKey []byte) error {
 	if err != nil {
 		return err
 	}
+	mcpClients, err := a.mcpClientStore.Load()
+	if err != nil {
+		return err
+	}
 	saves := []func() error{
 		func() error { return a.connectionStore.ForceSave(conns) },
 		func() error { return a.settingsStore.ForceSave(settings) },
 		func() error { return a.identityStore.ForceSave(idents) },
 		func() error { return a.proxyStore.ForceSave(proxies) },
 		func() error { return a.aiConfigStore.ForceSave(ai) },
+		func() error { return a.mcpClientStore.ForceSave(mcpClients) },
 	}
 	cs.SetKey(newKey)
 	var saveErrs []error

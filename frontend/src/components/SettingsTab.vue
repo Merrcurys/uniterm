@@ -1268,7 +1268,7 @@
               <div v-else-if="mcp.enabled" class="setting-desc mcp-running mcp-error">{{ t('settings.mcpNotRunning') }}</div>
             </div>
             <div class="setting-control switch-control">
-              <el-switch v-model="mcp.enabled" @change="saveMcp()" />
+              <el-switch v-model="mcp.enabled" :loading="mcpSaving" @change="saveMcp()" />
             </div>
           </div>
 
@@ -1277,7 +1277,30 @@
               <div class="setting-title">{{ t('settings.mcpPort') }}</div>
             </div>
             <div class="setting-control">
-              <el-input-number v-model="mcpPort" :min="1" :max="65535" controls-position="right" @change="saveMcp()" />
+              <el-input-number v-model="mcpPort" :disabled="mcpStatus.running || mcpSaving" :min="1" :max="65535" controls-position="right" @change="saveMcp()" />
+            </div>
+          </div>
+
+          <div class="setting-card">
+            <div class="setting-info">
+              <div class="setting-title">{{ t('settings.mcpExecMode') }}</div>
+              <div class="setting-desc">{{ t('settings.mcpExecModeDesc') }}</div>
+            </div>
+            <div class="setting-control">
+              <el-select v-model="mcp.execMode" :disabled="mcpStatus.running || mcpSaving" popper-class="mode-select-popper" @change="saveMcp()">
+                <el-option :label="t('settings.mcpExecModeBackground')" value="background">
+                  <div class="mode-option">
+                    <div class="mode-option-title">{{ t('settings.mcpExecModeBackground') }}</div>
+                    <div class="mode-option-desc">{{ t('settings.mcpExecModeBackgroundDesc') }}</div>
+                  </div>
+                </el-option>
+                <el-option :label="t('settings.mcpExecModeForeground')" value="foreground">
+                  <div class="mode-option">
+                    <div class="mode-option-title">{{ t('settings.mcpExecModeForeground') }}</div>
+                    <div class="mode-option-desc">{{ t('settings.mcpExecModeForegroundDesc') }}</div>
+                  </div>
+                </el-option>
+              </el-select>
             </div>
           </div>
 
@@ -1937,6 +1960,7 @@ onActivated(() => {
 const mcp = reactive({ ...DEFAULT_MCP_SETTINGS })
 const mcpPort = ref(DEFAULT_MCP_SETTINGS.port || 61207)
 const mcpStatus = ref<MCPStatus>({ running: false, port: 0 })
+const mcpSaving = ref(false)
 const mcpTokens = ref<string[]>([])
 const newTokenName = ref('')
 const mcpTokenCreated = ref('')
@@ -1956,14 +1980,20 @@ async function refreshMcpState() {
 }
 
 async function saveMcp() {
-  await localStateStore.update({
-    mcp: {
-      enabled: mcp.enabled,
-      port: mcpPort.value,
-      policy: mcp.policy,
-    },
-  })
-  refreshMcpState()
+  mcpSaving.value = true
+  try {
+    await localStateStore.update({
+      mcp: {
+        enabled: mcp.enabled,
+        port: mcpPort.value,
+        policy: mcp.policy,
+        execMode: mcp.execMode || 'background',
+      },
+    })
+    await refreshMcpState()
+  } finally {
+    mcpSaving.value = false
+  }
 }
 
 async function generateToken() {
