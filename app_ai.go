@@ -2092,6 +2092,19 @@ func (a *App) ListMCPClients() ([]store.MCPClientConfig, error) {
 // live connections (a newly added/enabled server connects immediately; a
 // disabled/edited one is dropped and re-dialed as needed).
 func (a *App) SaveMCPClient(cfg store.MCPClientConfig) error {
+	return a.saveMCPClient(cfg, "")
+}
+
+// UpdateMCPClient edits or renames an existing server in one store save.
+func (a *App) UpdateMCPClient(originalName string, cfg store.MCPClientConfig) error {
+	if strings.TrimSpace(originalName) == "" {
+		return errors.New("original MCP client name is required")
+	}
+	return a.saveMCPClient(cfg, originalName)
+}
+
+func (a *App) saveMCPClient(cfg store.MCPClientConfig, originalName string) error {
+	cfg.Name = strings.TrimSpace(cfg.Name)
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
@@ -2101,14 +2114,24 @@ func (a *App) SaveMCPClient(cfg store.MCPClientConfig) error {
 		return err
 	}
 	replaced := false
+	if originalName != "" {
+		for _, c := range all {
+			if c.Name == cfg.Name && c.Name != originalName {
+				return errors.New("an MCP client with this name already exists")
+			}
+		}
+	}
 	for i := range all {
-		if all[i].Name == cfg.Name {
+		if (originalName == "" && all[i].Name == cfg.Name) || all[i].Name == originalName {
 			all[i] = cfg
 			replaced = true
 			break
 		}
 	}
 	if !replaced {
+		if originalName != "" {
+			return errors.New("MCP client no longer exists")
+		}
 		all = append(all, cfg)
 	}
 	if err := a.mcpClientStore.Save(all); err != nil {
