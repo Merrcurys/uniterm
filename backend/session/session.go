@@ -414,6 +414,15 @@ type baseSession struct {
 	// foreground-keepalive counter) register here so they survive the App
 	// layer re-registering onStatusCallback via SetOnStatusChangeCallback.
 	statusListeners []func(SessionStatus)
+	// dataTaps are ADDITIONAL data observers (AddDataTap), fired alongside the
+	// single-slot onDataCallback without replacing it. Used by the MCP
+	// foreground job tap to collect a typed command's output without disturbing
+	// the frontend's own stream subscription.
+	dataTaps []func([]byte)
+	// statusTaps are REMOVABLE status observers (AddStatusTap); a short-lived
+	// watcher (MCP foreground job EOF) detaches when its job ends, unlike
+	// session-lifetime statusListeners. Guarded by s.mu.
+	statusTaps []func(SessionStatus)
 	mu               sync.RWMutex
 	pendingCols      int
 	pendingRows      int
@@ -524,12 +533,53 @@ func (s *baseSession) AddStatusListener(cb func(SessionStatus)) {
 	s.statusListeners = append(s.statusListeners, cb)
 }
 
+// AddDataTap registers an additive data observer. Unlike the single-slot
+// SetOnDataCallback (owned by the App layer and overwritten on re-register),
+// taps accumulate and are fired alongside it, so a job tap never replaces the
+// frontend's stream subscription. Returns an unsubscribe function.
+func (s *baseSession) AddDataTap(cb func([]byte)) func() {
+	s.mu.Lock()
+	s.dataTaps = append(s.dataTaps, cb)
+	idx := len(s.dataTaps) - 1
+	s.mu.Unlock()
+	return func() {
+		s.mu.Lock()
+		if idx < len(s.dataTaps) {
+			s.dataTaps = append(s.dataTaps[:idx], s.dataTaps[idx+1:]...)
+		}
+		s.mu.Unlock()
+	}
+}
+
+// AddStatusTap registers an additional, REMOVABLE status observer and returns
+// an unsubscribe function. AddStatusListener has no removal — fine for
+// session-lifetime consumers, but short-lived watchers (the MCP foreground
+// job's EOF watcher) need to detach when their job ends.
+func (s *baseSession) AddStatusTap(cb func(SessionStatus)) (untap func()) {
+	s.mu.Lock()
+	s.statusTaps = append(s.statusTaps, cb)
+	idx := len(s.statusTaps) - 1
+	s.mu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			s.mu.Lock()
+			if idx < len(s.statusTaps) {
+				s.statusTaps = append(s.statusTaps[:idx], s.statusTaps[idx+1:]...)
+			}
+			s.mu.Unlock()
+		})
+	}
+}
+
 func (s *baseSession) setStatus(st SessionStatus) {
 	s.mu.Lock()
 	s.status = st
 	cb := s.onStatusCallback
 	listeners := make([]func(SessionStatus), len(s.statusListeners))
 	copy(listeners, s.statusListeners)
+	taps := make([]func(SessionStatus), len(s.statusTaps))
+	copy(taps, s.statusTaps)
 	s.mu.Unlock()
 	if st == StatusDisconnected || st == StatusError {
 		// Terminal output is over; flush anything still queued (e.g. the
@@ -543,6 +593,9 @@ func (s *baseSession) setStatus(st SessionStatus) {
 	}
 	for _, l := range listeners {
 		l(st)
+	}
+	for _, tap := range taps {
+		tap(st)
 	}
 }
 
@@ -582,9 +635,14 @@ func (s *baseSession) emitData(data []byte) {
 	s.mu.RLock()
 	w := s.outputLogWriter
 	cb := s.onDataCallback
+	taps := make([]func([]byte), len(s.dataTaps))
+	copy(taps, s.dataTaps)
 	s.mu.RUnlock()
 	if w != nil {
 		w(data)
+	}
+	for _, tap := range taps {
+		tap(data)
 	}
 	if cb == nil {
 		return

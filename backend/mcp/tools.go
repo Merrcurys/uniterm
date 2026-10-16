@@ -49,6 +49,9 @@ func (s *Server) registerTools(srv *mcp.Server) {
 	}, s.toolInterruptCommand)
 
 	// ── Files group (SFTP over the session's connection) ─────────────
+	// ── Unified async-job group (uniterm_exec / result / interrupt) ──
+	s.registerJobTools(srv)
+
 	s.registerFileTools(srv)
 }
 
@@ -293,6 +296,9 @@ func (s *Server) clientLabel(ctx context.Context, req *mcp.CallToolRequest) stri
 		if init := sess.InitializeParams(); init != nil && init.ClientInfo != nil {
 			return init.ClientInfo.Name
 		}
+	}
+	if req == nil {
+		return "unknown"
 	}
 	return "unknown"
 }

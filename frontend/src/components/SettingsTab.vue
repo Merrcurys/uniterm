@@ -1329,6 +1329,96 @@
           </div>
         </div>
       </div>
+
+      <!-- MCP 客户端 (uniTerm 作为 client 连接外部服务器) — 无 Android 后端,入口已在移动端隐藏 -->
+      <div v-if="settingsStore.activeCategory === 'mcp-client'" class="settings-section">
+        <h2 class="section-title">{{ t('settings.mcpClientSection') }}</h2>
+        <p class="section-desc">{{ t('settings.mcpClientSectionDesc') }}</p>
+
+        <div class="settings-group">
+          <div
+            v-for="c in mcpClients"
+            :key="c.name"
+            class="model-card"
+          >
+            <div class="model-main">
+              <el-icon class="mcp-token-icon"><Plug :size="'0.875rem'" /></el-icon>
+              <span class="model-name">{{ c.name }}</span>
+              <span class="setting-desc">
+                {{ c.transport === 'stdio' ? (c.command || '') : (c.url || '') }}
+              </span>
+              <span class="setting-desc">
+                {{ mcpClientStatus(c.name)?.connected
+                  ? t('settings.mcpClientOnline', { tools: mcpClientStatus(c.name)?.tools ?? 0 })
+                  : (mcpClientStatus(c.name)?.error ? mcpClientStatus(c.name)?.error : t('settings.mcpClientOffline')) }}
+              </span>
+            </div>
+            <div class="model-actions">
+              <el-switch v-model="c.enabled" @change="saveMcpClient(c)" />
+              <el-button link @click="testMcpClient(c)">{{ t('settings.mcpClientTest') }}</el-button>
+              <el-button link type="danger" @click="removeMcpClient(c.name)">
+                <el-icon><Trash2 :size="'0.875rem'" /></el-icon>
+              </el-button>
+            </div>
+          </div>
+        </div>
+
+        <h2 class="section-title">{{ t('settings.mcpClientAdd') }}</h2>
+        <div class="settings-group">
+          <div class="setting-card">
+            <div class="setting-info">
+              <div class="setting-title">{{ t('settings.mcpClientName') }}</div>
+            </div>
+            <div class="setting-control">
+              <el-input v-model="mcpClientForm.name" :placeholder="t('settings.mcpClientNamePlaceholder')" style="width: 12rem" />
+            </div>
+          </div>
+          <div class="setting-card">
+            <div class="setting-info">
+              <div class="setting-title">{{ t('settings.mcpClientTransport') }}</div>
+            </div>
+            <div class="setting-control">
+              <el-select v-model="mcpClientForm.transport" style="width: 10rem">
+                <el-option label="stdio" value="stdio" />
+                <el-option label="streamable-http" value="streamable-http" />
+                <el-option label="sse" value="sse" />
+              </el-select>
+            </div>
+          </div>
+          <div class="setting-card" v-if="mcpClientForm.transport === 'stdio'">
+            <div class="setting-info">
+              <div class="setting-title">{{ t('settings.mcpClientCommand') }}</div>
+              <div class="setting-desc">{{ t('settings.mcpClientCommandDesc') }}</div>
+            </div>
+            <div class="setting-control" style="min-width: 16rem">
+              <el-input v-model="mcpClientForm.command" placeholder="npx -y @modelcontextprotocol/server-filesystem /tmp" />
+            </div>
+          </div>
+          <div class="setting-card" v-else>
+            <div class="setting-info">
+              <div class="setting-title">{{ t('settings.mcpClientUrl') }}</div>
+            </div>
+            <div class="setting-control" style="min-width: 16rem">
+              <el-input v-model="mcpClientForm.url" placeholder="http://127.0.0.1:8080/mcp" />
+            </div>
+          </div>
+          <div class="setting-card">
+            <div class="setting-info">
+              <div class="setting-title">{{ t('settings.mcpClientHeaders') }}</div>
+              <div class="setting-desc">{{ t('settings.mcpClientHeadersDesc') }}</div>
+            </div>
+            <div class="setting-control" style="min-width: 16rem">
+              <el-input v-model="mcpClientForm.headersText" type="textarea" :rows="2" placeholder='{ "Authorization": "Bearer ..." }' />
+            </div>
+          </div>
+          <div class="setting-card">
+            <div class="setting-info"></div>
+            <div class="setting-control">
+              <el-button type="primary" @click="addMcpClient">{{ t('settings.mcpClientAddButton') }}</el-button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- MCP token setup wizard (one-time token + per-client configs) -->
@@ -1495,7 +1585,7 @@
 import { ref, reactive, watch, computed, onMounted, onUnmounted, onActivated } from 'vue'
 import { Settings, Monitor, MessageCircleMore, Info, RefreshCw, Pencil, Trash2, Globe, Keyboard, Plus, BookOpen, Wrench, FolderOpen, Key, Network, ArrowRightLeft, ChevronLeft, ChevronRight, Plug } from '@lucide/vue'
 import { msg } from '../services/message'
-import { FetchModels, ChatCompletion, GetPlatform, GetAllFonts, GetDefaultSessionLogDir, OpenDirectoryDialog, OpenFileDialogFiltered, SetBackgroundImage, ClearBackgroundImage, GetBackgroundImage, RelaunchApp, ListExternalEditors, GenerateMCPToken, RevokeMCPToken, ListMCPTokens, GetMCPStatus } from '../../bindings/github.com/ys-ll/uniterm/app'
+import { FetchModels, ChatCompletion, GetPlatform, GetAllFonts, GetDefaultSessionLogDir, OpenDirectoryDialog, OpenFileDialogFiltered, SetBackgroundImage, ClearBackgroundImage, GetBackgroundImage, RelaunchApp, ListExternalEditors, GenerateMCPToken, RevokeMCPToken, ListMCPTokens, GetMCPStatus, ListMCPClients, SaveMCPClient, RemoveMCPClient, TestMCPClient, MCPClientStatuses } from '../../bindings/github.com/ys-ll/uniterm/app'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useSyncStore, SYNC_FILE_ITEMS } from '../stores/syncStore'
 import { useLocalStateStore } from '../stores/localStateStore'
@@ -1916,6 +2006,121 @@ async function revokeToken(name: string) {
 }
 
 onMounted(refreshMcpState)
+
+// ── MCP client (uniTerm connects to external servers) ──────────
+// List persisted in mcp_clients.json via app bindings; live health comes from
+// MCPClientStatuses. Separate from the MCP server block above.
+interface MCPClientForm {
+  name: string
+  transport: string
+  command: string
+  url: string
+  headersText: string
+  enabled: boolean
+}
+const mcpClients = ref<any[]>([])
+const mcpClientHealth = ref<Record<string, { connected: boolean; tools: number; error: string }>>({})
+const mcpClientForm = reactive<MCPClientForm>({
+  name: '', transport: 'stdio', command: '', url: '', headersText: '', enabled: true,
+})
+
+function mcpClientStatus(name: string) {
+  return mcpClientHealth.value[name]
+}
+
+async function refreshMcpClients() {
+  try {
+    mcpClients.value = (await ListMCPClients()) || []
+  } catch { mcpClients.value = [] }
+  try {
+    const statuses = (await MCPClientStatuses()) || []
+    const map: Record<string, { connected: boolean; tools: number; error: string }> = {}
+    for (const s of statuses) map[s.name] = { connected: s.connected, tools: s.tools, error: s.error || '' }
+    mcpClientHealth.value = map
+  } catch { /* health optional */ }
+}
+
+async function saveMcpClient(c: any) {
+  try {
+    await SaveMCPClient({ ...c, headers: parseHeaders(c) })
+    refreshMcpClients()
+  } catch (e: any) {
+    msg.error(backendErrorText(e))
+  }
+}
+
+async function addMcpClient() {
+  const headers = parseHeaders(mcpClientForm)
+  const tokens = splitCommandLine(mcpClientForm.command)
+  const cfg = {
+    name: mcpClientForm.name.trim(),
+    transport: mcpClientForm.transport,
+    command: tokens[0] ?? '',
+    args: tokens.slice(1),
+    url: mcpClientForm.url.trim(),
+    headers,
+    enabled: true,
+  }
+  if (!cfg.name) { msg.error(t('settings.mcpClientName')); return }
+  try {
+    await SaveMCPClient(cfg)
+    mcpClientForm.name = ''; mcpClientForm.command = ''; mcpClientForm.url = ''; mcpClientForm.headersText = ''
+    refreshMcpClients()
+  } catch (e: any) {
+    msg.error(backendErrorText(e))
+  }
+}
+
+function parseHeaders(src: { headersText?: string; headers?: Record<string,string> }): Record<string, string> {
+  const merged: Record<string, string> = {}
+  if (src.headers && typeof src.headers === 'object') Object.assign(merged, src.headers)
+  const text = (src.headersText || '').trim()
+  if (!text) return merged
+  try {
+    const parsed = JSON.parse(text)
+    if (typeof parsed === 'object' && parsed) Object.assign(merged, parsed)
+    return merged
+  } catch {
+    msg.error(t('settings.mcpClientHeadersInvalid'))
+    return merged
+  }
+}
+
+function splitCommandLine(command: string): string[] {
+  // Minimal shell-like split: quoted segments preserved. Good enough for the
+  // common `npx -y pkg` form; full shell parsing stays out of scope here.
+  const out: string[] = []
+  const re = /"([^"]*)"|'([^']*)'|(\S+)/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(command)) !== null) {
+    out.push(m[1] ?? m[2] ?? m[3] ?? '')
+  }
+  return out
+}
+
+async function testMcpClient(c: any) {
+  try {
+    const tools = await TestMCPClient({ ...c, headers: parseHeaders(c) })
+    msg.success(t('settings.mcpClientTestOk', { name: c.name, tools: tools.length }))
+    refreshMcpClients()
+  } catch (e: any) {
+    msg.error(backendErrorText(e))
+  }
+}
+
+async function removeMcpClient(name: string) {
+  try {
+    await ElMessageBox.confirm(t('settings.mcpClientRemoveConfirm', { name }), t('settings.mcpClientRemove'))
+  } catch { return }
+  try {
+    await RemoveMCPClient(name)
+    refreshMcpClients()
+  } catch (e: any) {
+    msg.error(backendErrorText(e))
+  }
+}
+
+onMounted(refreshMcpClients)
 
 onMounted(async () => {
   try {
@@ -2412,6 +2617,7 @@ const categories = computed(() => {
     { key: 'ai', label: t('settings.ai'), icon: MessageCircleMore },
     // MCP server has no mobile backend — hidden from the category list there.
     ...(!isMobile ? [{ key: 'mcp', label: t('settings.mcp'), icon: Plug }] : []),
+    ...(!isMobile ? [{ key: 'mcp-client', label: t('settings.mcpClient'), icon: Plug }] : []),
     { key: 'skills', label: t('settings.skillsAndCommands'), icon: Wrench },
     { key: 'identities', label: t('settings.identities'), icon: Key },
     { key: 'proxies', label: t('settings.proxies'), icon: Network },

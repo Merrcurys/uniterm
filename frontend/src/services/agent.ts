@@ -7,6 +7,7 @@ import { useTabStore } from '../stores/tabStore'
 import { usePanelStore } from '../stores/panelStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { useSkillStore } from '../stores/skillStore'
+import { loadRemoteMCPTools, toAgentToolEntry, callRemoteMCPTool, isRemoteMCPTool } from './mcpTools'
 import { GetSkillFile, ListSkillFiles } from '../../bindings/github.com/ys-ll/uniterm/app'
 import type { AIAttachment, AIMessage } from '../types/ai'
 import { Events } from '@wailsio/runtime'
@@ -546,6 +547,11 @@ export async function runAgent(userInput: string, skillName?: string, skillBody?
     setActiveAssistantMsg(null)
   }
 
+  // External MCP client tools: fetched once per run and merged into the tool
+  // set. A failing/external server degrades to an empty list (see mcpTools).
+  const remoteTools = await loadRemoteMCPTools()
+  const mergedTools = [...AVAILABLE_TOOLS, ...remoteTools.map(toAgentToolEntry)]
+
   let turnCount = 0
   const maxTurns = useSettingsStore().settings.ai.maxTurns ?? 20
 
@@ -601,7 +607,7 @@ export async function runAgent(userInput: string, skillName?: string, skillBody?
     const chatOptions: any = {
       system: buildSystemPrompt(),
       messages: store.conversation,
-      tools: AVAILABLE_TOOLS,
+      tools: mergedTools,
       onChunk: (chunk: string) => {
         if (store.stopRequested) return
         if (streamedText) return // already handled by ai:token events
@@ -1085,6 +1091,25 @@ export async function runAgent(userInput: string, skillName?: string, skillBody?
           id: `msg-${Date.now()}`,
           role: 'tool',
           content: `[Error reading skill file: ${e.message ?? e}]`,
+          tool_call_id: tu.id
+        })
+      }
+    } else if (isRemoteMCPTool(tu.name)) {
+      // External MCP client tool: route straight to the Go manager. Arguments
+      // are passed through as the model supplied them; no terminal/risk gating.
+      try {
+        const result = await callRemoteMCPTool(tu.name, tu.input as Record<string, unknown>)
+        store.addMessage({
+          id: `msg-${Date.now()}`,
+          role: 'tool',
+          content: capToolResult(result || `[${tu.name} returned no output]`),
+          tool_call_id: tu.id
+        })
+      } catch (e: any) {
+        store.addMessage({
+          id: `msg-${Date.now()}`,
+          role: 'tool',
+          content: `[Error calling ${tu.name}: ${e.message ?? e}]`,
           tool_call_id: tu.id
         })
       }
