@@ -768,7 +768,7 @@ import { isSqlDbType } from '../utils/quickConnect'
 import { CATEGORY_META, CATEGORY_ORDER, CONNECTION_TYPES, connectionTypeFormLabel, connectionTypeInfo, defaultPortFor } from '../utils/connectionTypes'
 import { getShellLabel as getShellLabelBase } from '../utils/shellLabel'
 import { backendErrorText } from '../utils/backendError'
-import { isMobilePlatform } from '../utils/platform'
+import { isMobilePlatform, supportsLocalTerminal } from '../utils/platform'
 import type { Identity } from '../types/identity'
 import type { Proxy } from '../types/proxy'
 
@@ -826,11 +826,9 @@ const allSubTypes = computed((): Record<string, SubTypeInfo[]> => {
   for (const info of CONNECTION_TYPES) {
     if (info.formHidden) continue
     if (info.windowsOnly && !isWindows.value) continue
-    // Local terminals spawn a host shell, serial needs host serial-port
-    // hardware and X11 needs a local X server — none of which exist on
-    // android/ios (same rule as StartTabContent's hidden local-terminal
-    // button).
-    if (isMobilePlatform() && (info.type === 'local' || info.type === 'serial' || info.type === 'x11-desktop')) continue
+    if (info.type === 'local' && !supportsLocalTerminal()) continue
+    // Serial hardware and a local X server remain desktop-only.
+    if (isMobilePlatform() && (info.type === 'serial' || info.type === 'x11-desktop')) continue
     groups[info.category].push({
       type: info.type,
       dbType: info.dbType,
