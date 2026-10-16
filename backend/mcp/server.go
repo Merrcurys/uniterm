@@ -78,6 +78,8 @@ type Env struct {
 	// Connect opens a new SSH session for a saved connection id and returns
 	// the session id. The approval gate runs before dialing.
 	Connect func(connectionID string) (sessionID string, err error)
+	// OpenTerminal opens a saved terminal profile, or an ad hoc local/WSL terminal.
+	OpenTerminal func(connectionID, terminalType, shellPath string) (string, error)
 	// Approve surfaces a confirmation request to the user and waits for the
 	// verdict. err is non-nil on timeout/no-window.
 	Approve func(req ApprovalRequest) error
@@ -103,10 +105,27 @@ type Env struct {
 	// unified uniterm_exec tool reports foreground mode unsupported; background
 	// mode still works over Sessions/Commands.
 	Foreground ForegroundJobs
+	// ExecMode returns the user-selected execution mode: "background" (SSH
+	// non-PTY exec tools) or "foreground" (live-terminal tools plus capture /
+	// send-key). Read once per server Start to pick the registered toolset;
+	// the user stops the endpoint before changing it in settings.
+	// "" / unknown falls back to background.
+	ExecMode func() string
+	// Capture snapshots a live session's terminal screen (redraw-resolved,
+	// like what the user sees). Used by the foreground toolset's
+	// uniterm_capture; nil disables the tool.
+	Capture func(sessionID string, tailLines int) (string, error)
+	// SendKey types text or a control key into a live session's terminal.
+	// text is typed verbatim (sendEnter appends the shell newline); control
+	// is "ctrl_c" | "ctrl_d" | "enter". Used by uniterm_send_key; nil
+	// disables the tool.
+	SendKey func(sessionID, text, control string, sendEnter bool) error
+	// Collect starts read-only output observation using the foreground job engine.
+	Collect func(sessionID string, idleMs, hardLimitMs int) (string, error)
 }
 
 // ForegroundJobs is the unified async-job surface for the live-PTY (foreground)
-// mode. Implemented by the App layer over the mcpjob registry; kept as an
+// mode. Implemented by the App layer over the foreground job registry; kept as an
 // interface so the mcp package stays testable without a real session.
 type ForegroundJobs interface {
 	// StartForeground types command into sessionID's live terminal and returns
@@ -220,7 +239,8 @@ type Server struct {
 	started bool
 	// finishedBg caches sync-completed background results for the unified
 	// uniterm_exec_result poll path (keyed by bg- jobId).
-	finishedBg map[string]finishedBackground
+	finishedBg       map[string]finishedBackground
+	foregroundOutput map[string]terminalOutputOptions
 }
 
 // TokenInfo is the stored form of one client token.

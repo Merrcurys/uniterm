@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/ys-ll/uniterm/backend/store"
 	"net/http"
 	"os/exec"
 	"strings"
@@ -24,7 +25,7 @@ type Session interface {
 
 // dialer connects a config to a live MCP session. The default uses the SDK;
 // tests replace it with an in-memory dialer.
-type dialer func(ctx context.Context, cfg ClientConfig) (Session, error)
+type dialer func(ctx context.Context, cfg store.MCPClientConfig) (Session, error)
 
 // DiscoveredTool is one external tool flattened for the built-in AI.
 type DiscoveredTool struct {
@@ -40,7 +41,7 @@ type DiscoveredTool struct {
 
 // Conn is one live external server connection.
 type Conn struct {
-	cfg     ClientConfig
+	cfg     store.MCPClientConfig
 	session Session
 	tools   []DiscoveredTool
 	// err records the last connect/list failure for status display; a conn
@@ -53,38 +54,38 @@ type Conn struct {
 
 // Manager owns the set of live external MCP connections.
 type Manager struct {
-	store *Store
+	store *store.MCPClientStore
 	dial  dialer
 	mu    sync.Mutex
 	conns map[string]*Conn
 }
 
 // NewManager builds a manager over the store with the default SDK dialer.
-func NewManager(store *Store) *Manager {
-	m := &Manager{store: store, conns: map[string]*Conn{}}
+func NewManager(configStore *store.MCPClientStore) *Manager {
+	m := &Manager{store: configStore, conns: map[string]*Conn{}}
 	m.dial = m.defaultDial
 	return m
 }
 
 // defaultDial connects via the go-sdk transport matching cfg.Transport.
-func (m *Manager) defaultDial(ctx context.Context, cfg ClientConfig) (Session, error) {
+func (m *Manager) defaultDial(ctx context.Context, cfg store.MCPClientConfig) (Session, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "uniterm-mcp-client", Version: "1.0.0"}, nil)
 
 	var transport mcp.Transport
 	switch cfg.Transport {
-	case TransportStdio:
+	case store.MCPTransportStdio:
 		cmd := exec.CommandContext(ctx, cfg.Command, cfg.Args...)
 		if len(cfg.Env) > 0 {
 			cmd.Env = append(cmd.Environ(), envPairs(cfg.Env)...)
 		}
 		transport = &mcp.CommandTransport{Command: cmd}
-	case TransportStreamableHTTP:
+	case store.MCPTransportStreamableHTTP:
 		transport = &mcp.StreamableClientTransport{
 			Endpoint:             cfg.URL,
 			HTTPClient:           &http.Client{Transport: &headerRoundTripper{headers: cfg.Headers}, Timeout: 30 * time.Second},
 			DisableStandaloneSSE: true, // request-response only; no server push needed by the AI panel
 		}
-	case TransportSSE:
+	case store.MCPTransportSSE:
 		transport = &mcp.SSEClientTransport{
 			Endpoint:   cfg.URL,
 			HTTPClient: &http.Client{Transport: &headerRoundTripper{headers: cfg.Headers}, Timeout: 30 * time.Second},
@@ -201,7 +202,7 @@ func (m *Manager) Reload(ctx context.Context) {
 	m.mu.Unlock()
 }
 
-func (m *Manager) ensureConn(ctx context.Context, cfg ClientConfig) {
+func (m *Manager) ensureConn(ctx context.Context, cfg store.MCPClientConfig) {
 	m.mu.Lock()
 	if existing, ok := m.conns[cfg.Name]; ok && existing.session != nil && existing.err == nil {
 		m.mu.Unlock()
@@ -305,7 +306,7 @@ type ConnStatus struct {
 
 // Statuses returns a health row for every persisted config (including
 // disconnected/failed ones) so the UI can show why a server is down.
-func (m *Manager) Statuses(configs []ClientConfig) []ConnStatus {
+func (m *Manager) Statuses(configs []store.MCPClientConfig) []ConnStatus {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := make([]ConnStatus, 0, len(configs))
@@ -358,7 +359,7 @@ func (m *Manager) CallTool(ctx context.Context, qualified string, args map[strin
 
 // TestConnection dials a one-shot connection, lists its tools, and closes. Used
 // by the settings "test" button without persisting state first.
-func (m *Manager) TestConnection(ctx context.Context, cfg ClientConfig) ([]DiscoveredTool, error) {
+func (m *Manager) TestConnection(ctx context.Context, cfg store.MCPClientConfig) ([]DiscoveredTool, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -380,16 +381,6 @@ func (m *Manager) CloseAll() {
 		m.closeLocked(c)
 	}
 	m.conns = map[string]*Conn{}
-}
-
-// StoreLoad exposes the persisted list for the App bindings.
-func (m *Manager) StoreLoad() ([]ClientConfig, error) {
-	return m.store.Load()
-}
-
-// StoreSave persists the list (App bindings own the upsert).
-func (m *Manager) StoreSave(clients []ClientConfig) error {
-	return m.store.Save(clients)
 }
 
 // extractText concatenates text content blocks; non-text blocks are rendered as

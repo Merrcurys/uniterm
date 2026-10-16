@@ -169,6 +169,7 @@ func (a *App) CreateSession(sessionType string, config session.ConnectionConfig)
 		})
 	}
 
+	a.sessionCaptureFor(s)
 	s.SetOnDataCallback(func(data []byte) {
 		a.emit("session:data", map[string]interface{}{
 			"id":   s.ID(),
@@ -472,6 +473,7 @@ func (a *App) DuplicateSSHChannel(sourceSessionID string, config session.Connect
 	}
 	s.SetEncoding(config.Encoding)
 
+	a.sessionCaptureFor(s)
 	s.SetOnDataCallback(func(data []byte) {
 		a.emit("session:data", map[string]interface{}{
 			"id":   s.ID(),
@@ -572,6 +574,7 @@ func (a *App) CloseSession(sessionID string) error {
 	if a.tunnelService != nil {
 		a.tunnelService.Stop(sessionID)
 	}
+	a.removeCapture(sessionID)
 	return a.sessionManager.Close(sessionID)
 }
 

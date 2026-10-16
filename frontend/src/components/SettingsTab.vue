@@ -1268,7 +1268,7 @@
               <div v-else-if="mcp.enabled" class="setting-desc mcp-running mcp-error">{{ t('settings.mcpNotRunning') }}</div>
             </div>
             <div class="setting-control switch-control">
-              <el-switch v-model="mcp.enabled" @change="saveMcp()" />
+              <el-switch v-model="mcp.enabled" :loading="mcpSaving" @change="saveMcp()" />
             </div>
           </div>
 
@@ -1277,7 +1277,30 @@
               <div class="setting-title">{{ t('settings.mcpPort') }}</div>
             </div>
             <div class="setting-control">
-              <el-input-number v-model="mcpPort" :min="1" :max="65535" controls-position="right" @change="saveMcp()" />
+              <el-input-number v-model="mcpPort" :disabled="mcpStatus.running || mcpSaving" :min="1" :max="65535" controls-position="right" @change="saveMcp()" />
+            </div>
+          </div>
+
+          <div class="setting-card">
+            <div class="setting-info">
+              <div class="setting-title">{{ t('settings.mcpExecMode') }}</div>
+              <div class="setting-desc">{{ t('settings.mcpExecModeDesc') }}</div>
+            </div>
+            <div class="setting-control">
+              <el-select v-model="mcp.execMode" :disabled="mcpStatus.running || mcpSaving" popper-class="mode-select-popper" @change="saveMcp()">
+                <el-option :label="t('settings.mcpExecModeBackground')" value="background">
+                  <div class="mode-option">
+                    <div class="mode-option-title">{{ t('settings.mcpExecModeBackground') }}</div>
+                    <div class="mode-option-desc">{{ t('settings.mcpExecModeBackgroundDesc') }}</div>
+                  </div>
+                </el-option>
+                <el-option :label="t('settings.mcpExecModeForeground')" value="foreground">
+                  <div class="mode-option">
+                    <div class="mode-option-title">{{ t('settings.mcpExecModeForeground') }}</div>
+                    <div class="mode-option-desc">{{ t('settings.mcpExecModeForegroundDesc') }}</div>
+                  </div>
+                </el-option>
+              </el-select>
             </div>
           </div>
 
@@ -1336,85 +1359,39 @@
         <p class="section-desc">{{ t('settings.mcpClientSectionDesc') }}</p>
 
         <div class="settings-group">
-          <div
-            v-for="c in mcpClients"
-            :key="c.name"
-            class="model-card"
-          >
-            <div class="model-main">
-              <el-icon class="mcp-token-icon"><Plug :size="'0.875rem'" /></el-icon>
-              <span class="model-name">{{ c.name }}</span>
-              <span class="setting-desc">
-                {{ c.transport === 'stdio' ? (c.command || '') : (c.url || '') }}
-              </span>
-              <span class="setting-desc">
-                {{ mcpClientStatus(c.name)?.connected
-                  ? t('settings.mcpClientOnline', { tools: mcpClientStatus(c.name)?.tools ?? 0 })
-                  : (mcpClientStatus(c.name)?.error ? mcpClientStatus(c.name)?.error : t('settings.mcpClientOffline')) }}
-              </span>
+          <div class="setting-card">
+            <div class="setting-info">
+              <div class="setting-title">{{ t('settings.mcpClientAdd') }}</div>
             </div>
-            <div class="model-actions">
+            <div class="setting-control">
+              <el-button @click="openMcpClientForm()"><Plus :size="'0.875rem'" /> {{ t('settings.mcpClientAddButton') }}</el-button>
+            </div>
+          </div>
+
+          <div v-for="c in mcpClients" :key="c.name" class="model-card mcp-client-card">
+            <Plug :size="'1rem'" class="mcp-client-icon" />
+            <div class="mcp-client-main">
+              <div class="mcp-client-heading">
+                <span class="model-name mcp-client-name" :title="c.name">{{ c.name }}</span>
+                <span class="mcp-client-transport">{{ mcpClientTransportLabel(c.transport) }}</span>
+              </div>
+              <div class="mcp-client-details">
+                <span class="mcp-client-endpoint" :title="mcpClientEndpoint(c)">{{ mcpClientEndpoint(c) }}</span>
+                <span v-if="c.enabled" class="mcp-client-status" :class="{ connected: mcpClientStatus(c.name)?.connected }" :title="mcpClientStatus(c.name)?.error || ''">
+                  {{ mcpClientStatus(c.name)?.connected
+                    ? t('settings.mcpClientOnline', { tools: mcpClientStatus(c.name)?.tools ?? 0 })
+                    : (mcpClientStatus(c.name)?.error || t('settings.mcpClientOffline')) }}
+                </span>
+              </div>
+            </div>
+            <div class="model-actions mcp-client-actions">
               <el-switch v-model="c.enabled" @change="saveMcpClient(c)" />
-              <el-button link @click="testMcpClient(c)">{{ t('settings.mcpClientTest') }}</el-button>
-              <el-button link type="danger" @click="removeMcpClient(c.name)">
+              <el-button link :title="t('common.edit')" :aria-label="t('common.edit')" @click="openMcpClientForm(c)">
+                <el-icon><Pencil :size="'0.875rem'" /></el-icon>
+              </el-button>
+              <el-button link type="danger" :title="t('settings.mcpClientRemove')" :aria-label="t('settings.mcpClientRemove')" @click="removeMcpClient(c.name)">
                 <el-icon><Trash2 :size="'0.875rem'" /></el-icon>
               </el-button>
-            </div>
-          </div>
-        </div>
-
-        <h2 class="section-title">{{ t('settings.mcpClientAdd') }}</h2>
-        <div class="settings-group">
-          <div class="setting-card">
-            <div class="setting-info">
-              <div class="setting-title">{{ t('settings.mcpClientName') }}</div>
-            </div>
-            <div class="setting-control">
-              <el-input v-model="mcpClientForm.name" :placeholder="t('settings.mcpClientNamePlaceholder')" style="width: 12rem" />
-            </div>
-          </div>
-          <div class="setting-card">
-            <div class="setting-info">
-              <div class="setting-title">{{ t('settings.mcpClientTransport') }}</div>
-            </div>
-            <div class="setting-control">
-              <el-select v-model="mcpClientForm.transport" style="width: 10rem">
-                <el-option label="stdio" value="stdio" />
-                <el-option label="streamable-http" value="streamable-http" />
-                <el-option label="sse" value="sse" />
-              </el-select>
-            </div>
-          </div>
-          <div class="setting-card" v-if="mcpClientForm.transport === 'stdio'">
-            <div class="setting-info">
-              <div class="setting-title">{{ t('settings.mcpClientCommand') }}</div>
-              <div class="setting-desc">{{ t('settings.mcpClientCommandDesc') }}</div>
-            </div>
-            <div class="setting-control" style="min-width: 16rem">
-              <el-input v-model="mcpClientForm.command" placeholder="npx -y @modelcontextprotocol/server-filesystem /tmp" />
-            </div>
-          </div>
-          <div class="setting-card" v-else>
-            <div class="setting-info">
-              <div class="setting-title">{{ t('settings.mcpClientUrl') }}</div>
-            </div>
-            <div class="setting-control" style="min-width: 16rem">
-              <el-input v-model="mcpClientForm.url" placeholder="http://127.0.0.1:8080/mcp" />
-            </div>
-          </div>
-          <div class="setting-card">
-            <div class="setting-info">
-              <div class="setting-title">{{ t('settings.mcpClientHeaders') }}</div>
-              <div class="setting-desc">{{ t('settings.mcpClientHeadersDesc') }}</div>
-            </div>
-            <div class="setting-control" style="min-width: 16rem">
-              <el-input v-model="mcpClientForm.headersText" type="textarea" :rows="2" placeholder='{ "Authorization": "Bearer ..." }' />
-            </div>
-          </div>
-          <div class="setting-card">
-            <div class="setting-info"></div>
-            <div class="setting-control">
-              <el-button type="primary" @click="addMcpClient">{{ t('settings.mcpClientAddButton') }}</el-button>
             </div>
           </div>
         </div>
@@ -1428,6 +1405,54 @@
       :port="mcpStatus.port || mcpPort"
       @close="onMcpSetupClose"
     />
+
+    <el-dialog
+      append-to-body
+      v-model="showMcpClientForm"
+      :title="editingMcpClient ? t('settings.mcpClientEdit') : t('settings.mcpClientAdd')"
+      width="33.75rem"
+      :close-on-click-modal="!mcpClientSaving && !mcpClientTesting"
+      :close-on-press-escape="!mcpClientSaving && !mcpClientTesting"
+      :show-close="!mcpClientSaving && !mcpClientTesting"
+    >
+      <el-form label-position="right" label-width="5rem" :disabled="mcpClientSaving || mcpClientTesting" @submit.prevent="submitMcpClient">
+        <el-form-item :label="t('settings.mcpClientName')" required :error="mcpClientNameExists ? t('settings.mcpClientNameExists') : ''">
+          <el-input v-model="mcpClientForm.name" :placeholder="t('settings.mcpClientNamePlaceholder')" />
+        </el-form-item>
+        <el-form-item :label="t('settings.mcpClientTransport')" required>
+          <el-select v-model="mcpClientForm.transport" popper-class="mode-select-popper" style="width: 100%">
+            <el-option v-for="option in mcpClientTransports" :key="option.value" :label="t(option.label)" :value="option.value">
+              <div class="mode-option">
+                <div class="mode-option-title">{{ t(option.label) }}</div>
+                <div class="mode-option-desc">{{ t(option.description) }}</div>
+              </div>
+            </el-option>
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="mcpClientForm.transport === 'stdio'" :label="t('settings.mcpClientCommand')" required>
+          <div class="mcp-client-field">
+            <el-input v-model="mcpClientForm.command" placeholder="npx -y @modelcontextprotocol/server-filesystem /tmp" />
+            <div class="setting-desc">{{ t('settings.mcpClientCommandDesc') }}</div>
+          </div>
+        </el-form-item>
+        <template v-else>
+          <el-form-item :label="t('settings.mcpClientUrl')" required>
+            <el-input v-model="mcpClientForm.url" placeholder="http://127.0.0.1:8080/mcp" />
+          </el-form-item>
+          <el-form-item :label="t('settings.mcpClientHeaders')">
+            <div class="mcp-client-field">
+              <el-input v-model="mcpClientForm.headersText" type="textarea" :rows="3" placeholder='{ "Authorization": "Bearer ..." }' />
+              <div class="setting-desc">{{ t('settings.mcpClientHeadersDesc') }}</div>
+            </div>
+          </el-form-item>
+        </template>
+      </el-form>
+      <template #footer>
+        <el-button :disabled="mcpClientSaving || mcpClientTesting" @click="showMcpClientForm = false">{{ t('settings.cancel') }}</el-button>
+        <el-button :loading="mcpClientTesting" :disabled="mcpClientSaving || !canAddMcpClient" @click="testMcpClientForm">{{ t('settings.mcpClientTest') }}</el-button>
+        <el-button type="primary" :loading="mcpClientSaving" :disabled="!canAddMcpClient || mcpClientTesting" @click="submitMcpClient">{{ t('settings.save') }}</el-button>
+      </template>
+    </el-dialog>
 
     <!-- Model Form Dialog -->
     <el-dialog append-to-body v-model="showModelForm" :title="editingModel ? t('settings.editModel') : t('settings.newModel')" width="25rem">
@@ -1583,9 +1608,9 @@
 
 <script setup lang="ts">
 import { ref, reactive, watch, computed, onMounted, onUnmounted, onActivated } from 'vue'
-import { Settings, Monitor, MessageCircleMore, Info, RefreshCw, Pencil, Trash2, Globe, Keyboard, Plus, BookOpen, Wrench, FolderOpen, Key, Network, ArrowRightLeft, ChevronLeft, ChevronRight, Plug } from '@lucide/vue'
+import { Settings, Monitor, MessageCircleMore, Info, RefreshCw, Pencil, Trash2, Globe, Keyboard, Plus, BookOpen, Wrench, FolderOpen, Key, Network, ArrowRightLeft, ChevronLeft, ChevronRight, Plug, Server } from '@lucide/vue'
 import { msg } from '../services/message'
-import { FetchModels, ChatCompletion, GetPlatform, GetAllFonts, GetDefaultSessionLogDir, OpenDirectoryDialog, OpenFileDialogFiltered, SetBackgroundImage, ClearBackgroundImage, GetBackgroundImage, RelaunchApp, ListExternalEditors, GenerateMCPToken, RevokeMCPToken, ListMCPTokens, GetMCPStatus, ListMCPClients, SaveMCPClient, RemoveMCPClient, TestMCPClient, MCPClientStatuses } from '../../bindings/github.com/ys-ll/uniterm/app'
+import { FetchModels, ChatCompletion, GetPlatform, GetAllFonts, GetDefaultSessionLogDir, OpenDirectoryDialog, OpenFileDialogFiltered, SetBackgroundImage, ClearBackgroundImage, GetBackgroundImage, RelaunchApp, ListExternalEditors, GenerateMCPToken, RevokeMCPToken, ListMCPTokens, GetMCPStatus, ListMCPClients, SaveMCPClient, UpdateMCPClient, RemoveMCPClient, TestMCPClient, MCPClientStatuses } from '../../bindings/github.com/ys-ll/uniterm/app'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useSyncStore, SYNC_FILE_ITEMS } from '../stores/syncStore'
 import { useLocalStateStore } from '../stores/localStateStore'
@@ -1937,6 +1962,7 @@ onActivated(() => {
 const mcp = reactive({ ...DEFAULT_MCP_SETTINGS })
 const mcpPort = ref(DEFAULT_MCP_SETTINGS.port || 61207)
 const mcpStatus = ref<MCPStatus>({ running: false, port: 0 })
+const mcpSaving = ref(false)
 const mcpTokens = ref<string[]>([])
 const newTokenName = ref('')
 const mcpTokenCreated = ref('')
@@ -1956,14 +1982,20 @@ async function refreshMcpState() {
 }
 
 async function saveMcp() {
-  await localStateStore.update({
-    mcp: {
-      enabled: mcp.enabled,
-      port: mcpPort.value,
-      policy: mcp.policy,
-    },
-  })
-  refreshMcpState()
+  mcpSaving.value = true
+  try {
+    await localStateStore.update({
+      mcp: {
+        enabled: mcp.enabled,
+        port: mcpPort.value,
+        policy: mcp.policy,
+        execMode: mcp.execMode || 'background',
+      },
+    })
+    await refreshMcpState()
+  } finally {
+    mcpSaving.value = false
+  }
 }
 
 async function generateToken() {
@@ -2020,9 +2052,49 @@ interface MCPClientForm {
 }
 const mcpClients = ref<any[]>([])
 const mcpClientHealth = ref<Record<string, { connected: boolean; tools: number; error: string }>>({})
+const mcpClientTransports = [
+  { value: 'streamable-http', label: 'settings.mcpClientTransportHttp', description: 'settings.mcpClientTransportHttpDesc' },
+  { value: 'stdio', label: 'settings.mcpClientTransportStdio', description: 'settings.mcpClientTransportStdioDesc' },
+  { value: 'sse', label: 'settings.mcpClientTransportSse', description: 'settings.mcpClientTransportSseDesc' },
+]
+
+function mcpClientTransportLabel(value: string): string {
+  const option = mcpClientTransports.find(option => option.value === value)
+  return option ? t(option.label) : value
+}
 const mcpClientForm = reactive<MCPClientForm>({
-  name: '', transport: 'stdio', command: '', url: '', headersText: '', enabled: true,
+  name: '', transport: 'streamable-http', command: '', url: '', headersText: '', enabled: true,
 })
+
+const showMcpClientForm = ref(false)
+const mcpClientSaving = ref(false)
+const mcpClientTesting = ref(false)
+const editingMcpClient = ref<any | null>(null)
+const mcpClientNameExists = computed(() => mcpClients.value.some(c => c.name === mcpClientForm.name.trim() && c.name !== editingMcpClient.value?.name))
+const canAddMcpClient = computed(() => !!mcpClientForm.name.trim() && !mcpClientNameExists.value && !!(
+  mcpClientForm.transport === 'stdio' ? mcpClientForm.command.trim() : mcpClientForm.url.trim()
+))
+
+function formatMcpCommand(c: any): string {
+  return [c.command || '', ...(c.args || [])].map((part: string) => {
+    if (part && !/[\s"']/.test(part)) return part
+    if (!part.includes("'")) return "'" + part + "'"
+    return '"' + part.replace(/"/g, '\\"') + '"'
+  }).join(' ')
+}
+
+function mcpClientEndpoint(c: any): string {
+  return c.transport === 'stdio' ? formatMcpCommand(c) : c.url || ''
+}
+
+function openMcpClientForm(client?: any) {
+  editingMcpClient.value = client ? { ...client } : null
+  Object.assign(mcpClientForm, client ? {
+    name: client.name, transport: client.transport, command: formatMcpCommand(client), url: client.url || '',
+    headersText: Object.keys(client.headers || {}).length ? JSON.stringify(client.headers, null, 2) : '', enabled: client.enabled,
+  } : { name: '', transport: 'streamable-http', command: '', url: '', headersText: '', enabled: true })
+  showMcpClientForm.value = true
+}
 
 function mcpClientStatus(name: string) {
   return mcpClientHealth.value[name]
@@ -2049,62 +2121,84 @@ async function saveMcpClient(c: any) {
   }
 }
 
-async function addMcpClient() {
-  const headers = parseHeaders(mcpClientForm)
-  const tokens = splitCommandLine(mcpClientForm.command)
+function mcpClientFormConfig() {
+  const isStdio = mcpClientForm.transport === 'stdio'
+  const original = editingMcpClient.value
+  const tokens = !isStdio ? [] : original && mcpClientForm.command === formatMcpCommand(original)
+    ? [original.command, ...(original.args || [])] : splitCommandLine(mcpClientForm.command)
   const cfg = {
+    ...editingMcpClient.value,
     name: mcpClientForm.name.trim(),
     transport: mcpClientForm.transport,
     command: tokens[0] ?? '',
     args: tokens.slice(1),
-    url: mcpClientForm.url.trim(),
-    headers,
-    enabled: true,
+    url: isStdio ? '' : mcpClientForm.url.trim(),
+    headers: isStdio ? original?.headers || {} : parseHeaders(mcpClientForm),
+    enabled: mcpClientForm.enabled,
   }
-  if (!cfg.name) { msg.error(t('settings.mcpClientName')); return }
+  return cfg
+}
+
+async function submitMcpClient() {
+  if (mcpClientSaving.value || mcpClientTesting.value || !canAddMcpClient.value) return
+  mcpClientSaving.value = true
   try {
-    await SaveMCPClient(cfg)
-    mcpClientForm.name = ''; mcpClientForm.command = ''; mcpClientForm.url = ''; mcpClientForm.headersText = ''
-    refreshMcpClients()
+    const cfg = mcpClientFormConfig()
+    if (editingMcpClient.value) await UpdateMCPClient(editingMcpClient.value.name, cfg)
+    else await SaveMCPClient(cfg)
+    await refreshMcpClients()
+    showMcpClientForm.value = false
   } catch (e: any) {
     msg.error(backendErrorText(e))
+  } finally {
+    mcpClientSaving.value = false
   }
 }
 
 function parseHeaders(src: { headersText?: string; headers?: Record<string,string> }): Record<string, string> {
-  const merged: Record<string, string> = {}
-  if (src.headers && typeof src.headers === 'object') Object.assign(merged, src.headers)
+  const merged: Record<string, string> = { ...src.headers }
   const text = (src.headersText || '').trim()
   if (!text) return merged
-  try {
-    const parsed = JSON.parse(text)
-    if (typeof parsed === 'object' && parsed) Object.assign(merged, parsed)
-    return merged
-  } catch {
-    msg.error(t('settings.mcpClientHeadersInvalid'))
-    return merged
+  let parsed: unknown
+  try { parsed = JSON.parse(text) } catch { throw new Error(t('settings.mcpClientHeadersInvalid')) }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || Object.values(parsed).some(v => typeof v !== 'string')) {
+    throw new Error(t('settings.mcpClientHeadersInvalid'))
   }
+  return { ...merged, ...parsed as Record<string, string> }
 }
 
 function splitCommandLine(command: string): string[] {
-  // Minimal shell-like split: quoted segments preserved. Good enough for the
-  // common `npx -y pkg` form; full shell parsing stays out of scope here.
   const out: string[] = []
-  const re = /"([^"]*)"|'([^']*)'|(\S+)/g
-  let m: RegExpExecArray | null
-  while ((m = re.exec(command)) !== null) {
-    out.push(m[1] ?? m[2] ?? m[3] ?? '')
+  let word = '', quote = '', started = false
+  for (let i = 0; i < command.length; i++) {
+    const char = command[i]
+    if (quote) {
+      if (char === quote) quote = ''
+      else if (quote === '"' && char === '\\' && command[i + 1] === '"') word += command[++i]
+      else word += char
+    } else if (char === '"' || char === "'") {
+      quote = char
+      started = true
+    } else if (/\s/.test(char)) {
+      if (started) { out.push(word); word = ''; started = false }
+    } else { word += char; started = true }
   }
+  if (quote) throw new Error(t('settings.mcpClientCommandInvalid'))
+  if (started) out.push(word)
   return out
 }
 
-async function testMcpClient(c: any) {
+async function testMcpClientForm() {
+  if (mcpClientSaving.value || mcpClientTesting.value || !canAddMcpClient.value) return
+  mcpClientTesting.value = true
   try {
-    const tools = await TestMCPClient({ ...c, headers: parseHeaders(c) })
-    msg.success(t('settings.mcpClientTestOk', { name: c.name, tools: tools.length }))
-    refreshMcpClients()
+    const cfg = mcpClientFormConfig()
+    const tools = await TestMCPClient(cfg)
+    msg.success(t('settings.mcpClientTestOk', { name: cfg.name, tools: tools.length }))
   } catch (e: any) {
     msg.error(backendErrorText(e))
+  } finally {
+    mcpClientTesting.value = false
   }
 }
 
@@ -2121,6 +2215,9 @@ async function removeMcpClient(name: string) {
 }
 
 onMounted(refreshMcpClients)
+watch(() => settingsStore.activeCategory, category => {
+  if (category === 'mcp-client') void refreshMcpClients()
+})
 
 onMounted(async () => {
   try {
@@ -2616,7 +2713,7 @@ const categories = computed(() => {
     ...(!isMobile ? [{ key: 'keyboard', label: t('shortcut.title'), icon: Keyboard }] : []),
     { key: 'ai', label: t('settings.ai'), icon: MessageCircleMore },
     // MCP server has no mobile backend — hidden from the category list there.
-    ...(!isMobile ? [{ key: 'mcp', label: t('settings.mcp'), icon: Plug }] : []),
+    ...(!isMobile ? [{ key: 'mcp', label: t('settings.mcp'), icon: Server }] : []),
     ...(!isMobile ? [{ key: 'mcp-client', label: t('settings.mcpClient'), icon: Plug }] : []),
     { key: 'skills', label: t('settings.skillsAndCommands'), icon: Wrench },
     { key: 'identities', label: t('settings.identities'), icon: Key },
@@ -3103,6 +3200,14 @@ async function onToggleSystemTitleBar(v: boolean) {
   line-height: 1.4;
 }
 
+.mcp-client-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  width: 100%;
+  min-width: 0;
+}
+
 .setting-control {
   flex-shrink: 0;
   min-width: 13.125rem;
@@ -3206,6 +3311,19 @@ async function onToggleSystemTitleBar(v: boolean) {
   gap: 0.25rem;
   flex-shrink: 0;
 }
+
+.mcp-client-card { gap: 0.75rem; }
+.mcp-client-icon { flex-shrink: 0; color: var(--text-muted); }
+.mcp-client-main { flex: 1; min-width: 0; }
+.mcp-client-heading, .mcp-client-details { display: flex; align-items: center; gap: 0.625rem; min-width: 0; }
+.mcp-client-details { margin-top: 0.25rem; font-size: 0.6875rem; color: var(--text-muted); }
+.mcp-client-name, .mcp-client-endpoint, .mcp-client-status { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mcp-client-name { min-width: 0; }
+.mcp-client-transport { flex-shrink: 0; padding: 0.0625rem 0.375rem; border-radius: var(--radius-sm); background: var(--bg-hover); color: var(--text-secondary); font-size: 0.625rem; line-height: 1.5; white-space: nowrap; }
+.mcp-client-endpoint { min-width: 0; font-family: var(--font-mono); }
+.mcp-client-status { flex-shrink: 0; max-width: 45%; }
+.mcp-client-status.connected { color: var(--el-color-success); }
+.mcp-client-actions { align-items: center; }
 
 /* MCP settings */
 .mcp-running {

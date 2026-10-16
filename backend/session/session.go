@@ -65,17 +65,17 @@ type CwdHookInjector interface {
 }
 
 type ConnectionConfig struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Remark   string `json:"remark,omitempty"`
-	Type     string `json:"type"`
-	Host     string `json:"host"`
-	Port     int    `json:"port"`
-	User     string `json:"user"`
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Remark string `json:"remark,omitempty"`
+	Type   string `json:"type"`
+	Host   string `json:"host"`
+	Port   int    `json:"port"`
+	User   string `json:"user"`
 	// SSHAlgorithms customizes the negotiated algorithms for SSH-based
 	// sessions. nil keeps the compatible default.
 	SSHAlgorithms *SSHAlgoConfig `json:"sshAlgorithms,omitempty"`
-	AuthType string `json:"authType"`
+	AuthType      string         `json:"authType"`
 	// AuthType "agent" uses SSH_AUTH_SOCK on Unix. On Windows it uses Pageant,
 	// falling back to the Windows OpenSSH agent named pipe.
 	// AuthType "kerberos" uses the local Kerberos credential cache and
@@ -262,7 +262,7 @@ type ConnectionConfig struct {
 	ContainerRuntime   string `json:"containerRuntime,omitempty"`   // "docker" | "podman" | "nerdctl"
 	// 容器文件会话（type=container-file）的目标容器 ID；容器连接走 config.ID
 	// ContainerNamespace 仅 k8s 连接使用（目标 Pod 的资源 namespace）
-	ContainerID       string `json:"containerId,omitempty"`
+	ContainerID        string `json:"containerId,omitempty"`
 	ContainerNamespace string `json:"containerNamespace,omitempty"`
 	// LogOnConnect, when true, tells the App layer to enable the
 	// session output log automatically the first time this panel binds
@@ -422,7 +422,7 @@ type baseSession struct {
 	// statusTaps are REMOVABLE status observers (AddStatusTap); a short-lived
 	// watcher (MCP foreground job EOF) detaches when its job ends, unlike
 	// session-lifetime statusListeners. Guarded by s.mu.
-	statusTaps []func(SessionStatus)
+	statusTaps       []func(SessionStatus)
 	mu               sync.RWMutex
 	pendingCols      int
 	pendingRows      int
@@ -539,34 +539,51 @@ func (s *baseSession) AddStatusListener(cb func(SessionStatus)) {
 // frontend's stream subscription. Returns an unsubscribe function.
 func (s *baseSession) AddDataTap(cb func([]byte)) func() {
 	s.mu.Lock()
-	s.dataTaps = append(s.dataTaps, cb)
-	idx := len(s.dataTaps) - 1
-	s.mu.Unlock()
-	return func() {
-		s.mu.Lock()
-		if idx < len(s.dataTaps) {
-			s.dataTaps = append(s.dataTaps[:idx], s.dataTaps[idx+1:]...)
+	idx := len(s.dataTaps)
+	for i, tap := range s.dataTaps {
+		if tap == nil {
+			idx = i
+			break
 		}
-		s.mu.Unlock()
 	}
-}
-
-// AddStatusTap registers an additional, REMOVABLE status observer and returns
-// an unsubscribe function. AddStatusListener has no removal — fine for
-// session-lifetime consumers, but short-lived watchers (the MCP foreground
-// job's EOF watcher) need to detach when their job ends.
-func (s *baseSession) AddStatusTap(cb func(SessionStatus)) (untap func()) {
-	s.mu.Lock()
-	s.statusTaps = append(s.statusTaps, cb)
-	idx := len(s.statusTaps) - 1
+	if idx == len(s.dataTaps) {
+		s.dataTaps = append(s.dataTaps, cb)
+	} else {
+		s.dataTaps[idx] = cb
+	}
 	s.mu.Unlock()
 	var once sync.Once
 	return func() {
 		once.Do(func() {
 			s.mu.Lock()
-			if idx < len(s.statusTaps) {
-				s.statusTaps = append(s.statusTaps[:idx], s.statusTaps[idx+1:]...)
-			}
+			s.dataTaps[idx] = nil
+			s.mu.Unlock()
+		})
+	}
+}
+
+// AddStatusTap registers a removable observer with a stable slot. Removing
+// one observer must never change the identity of another observer's slot.
+func (s *baseSession) AddStatusTap(cb func(SessionStatus)) func() {
+	s.mu.Lock()
+	idx := len(s.statusTaps)
+	for i, tap := range s.statusTaps {
+		if tap == nil {
+			idx = i
+			break
+		}
+	}
+	if idx == len(s.statusTaps) {
+		s.statusTaps = append(s.statusTaps, cb)
+	} else {
+		s.statusTaps[idx] = cb
+	}
+	s.mu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			s.mu.Lock()
+			s.statusTaps[idx] = nil
 			s.mu.Unlock()
 		})
 	}
@@ -595,7 +612,9 @@ func (s *baseSession) setStatus(st SessionStatus) {
 		l(st)
 	}
 	for _, tap := range taps {
-		tap(st)
+		if tap != nil {
+			tap(st)
+		}
 	}
 }
 
@@ -642,7 +661,9 @@ func (s *baseSession) emitData(data []byte) {
 		w(data)
 	}
 	for _, tap := range taps {
-		tap(data)
+		if tap != nil {
+			tap(data)
+		}
 	}
 	if cb == nil {
 		return
