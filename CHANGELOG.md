@@ -47,10 +47,13 @@
 - App: a fixed webview user-data folder is used instead of a per-process temp dir, so WebView data is no longer scattered across temp folders that accumulate; legacy per-pid temp dirs are swept at startup.
 - App: refuses to migrate the data directory into itself (nesting it under its own subfolder), which previously corrupted the directory layout.
 - Database: fixes binary Guid columns rendering as garbled bytes in the result grid — SQL Server `UNIQUEIDENTIFIER` and Oracle `RAW(16)` columns (the form EF Core / ABP write Guid keys in) now display as formatted GUID text, and other non-text binary values render as `0x`-prefixed hex. (@IBRAHIMELAMRABET)
-- Shells: scoop-installed Git Bash is labeled separately from system Git Bash, so the two entries in the shell list are distinguishable.
+- Shells: scoop-installed Git Bash is labeled separately from system Git Bash, so the two entries in the shell list are distinguishable. (@chris-edstrom)
 - Terminal: fixes full-screen TUIs (ncurses menus, ...) rendering incorrectly under heavy load — no more corrupted output or leftover content after exiting.
 - Credentials: fixes the credential store failing to unlock after the data directory is moved or copied, and a possible lockout after switching the encryption mode or changing the master password.
 - UI: fixes a black flash at startup when a light theme is configured.
+
+**Notes**
+- As this open-source software has not purchased a code-signing certificate, the unsigned executable may trigger false positives in some antivirus engines (e.g. Windows Defender). This is a known issue with Go/Wails applications (see [wailsapp/wails#3308](https://github.com/wailsapp/wails/issues/3308)). You can add an exclusion rule in your antivirus to allow it. Please download only from the official open-source channels — GitHub and Gitee. If you are still concerned about malware, you can download the source code and build and run it locally yourself.
 
 Thanks to @surenwuyuwuqiu, @dungvv, @andreafunicelli, @chris-edstrom, @IBRAHIMELAMRABET, @zhongqian97 and @laigcss for their contributions to this release.
 
@@ -99,10 +102,13 @@ Thanks to @surenwuyuwuqiu, @dungvv, @andreafunicelli, @chris-edstrom, @IBRAHIMEL
 - 应用：WebView 用户数据目录改为固定路径，不再按进程创建临时目录（避免临时目录不断累积）；启动时清理历史遗留的按进程临时目录。
 - 应用：拒绝将数据目录迁移到其自身内部（嵌套在自身子目录下），此前会破坏目录结构。
 - 数据库：修复二进制 Guid 列在结果网格中显示为乱码的问题——SQL Server 的 `UNIQUEIDENTIFIER` 与 Oracle 的 `RAW(16)` 列（EF Core / ABP 写入 Guid 主键的形式）现按格式化 GUID 文本显示，其他非文本二进制值以 `0x` 前缀的十六进制显示。(@IBRAHIMELAMRABET)
-- Shell：scoop 安装的 Git Bash 与系统 Git Bash 分开标注，shell 列表中两者可区分。
+- Shell：scoop 安装的 Git Bash 与系统 Git Bash 分开标注，shell 列表中两者可区分。 (@chris-edstrom)
 - 终端：修复负载高时全屏 TUI（ncurses 菜单等）界面显示错乱、退出后残留内容的问题。
 - 凭据：修复数据目录移动或复制后凭据存储无法恢复解锁的问题，以及切换加密模式 / 修改主密码后可能锁死存储的问题。
 - 界面：修复浅色主题下启动时闪黑的问题。
+
+**说明**
+- 由于本开源软件未购买代码签名证书，未签名的可执行文件可能被部分杀毒引擎（如 Windows Defender）误报拦截。这是 Go/Wails 应用的已知问题（参见 [wailsapp/wails#3308](https://github.com/wailsapp/wails/issues/3308)）。可在杀毒软件中添加排除规则放行。请务必从 GitHub、Gitee 官方开源渠道下载软件。如仍担心存在病毒，可自行下载源代码在本地构建运行。
 
 感谢 @surenwuyuwuqiu、@dungvv、@andreafunicelli、@chris-edstrom、@IBRAHIMELAMRABET、@zhongqian97 和 @laigcss 对本版本的贡献。
 
