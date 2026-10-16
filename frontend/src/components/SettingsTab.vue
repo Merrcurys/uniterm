@@ -654,9 +654,8 @@
 
         <h2 class="section-title">{{ t('settings.session') }}</h2>
         <div class="settings-group">
-          <!-- No user shells exist on mobile (same reason the start page hides
-               the local terminal button) -->
-          <div v-if="!isMobile" class="setting-card">
+          <!-- Android shares the local-shell settings with desktop platforms. -->
+          <div v-if="supportsLocalTerminal()" class="setting-card">
             <div class="setting-info">
               <div class="setting-title">{{ t('settings.defaultLocalShell') }}</div>
               <div class="setting-desc">{{ t('settings.defaultLocalShellDesc') }}</div>
@@ -1648,7 +1647,7 @@ import { useTunnelCredentials } from '../composables/useTunnelCredentials'
 import type { Tunnel, TunnelMode } from '../stores/tunnelStore'
 import type { Identity } from '../types/identity'
 import { Browser } from '@wailsio/runtime'
-import { isMobilePlatform } from '../utils/platform'
+import { isMobilePlatform, supportsLocalTerminal } from '../utils/platform'
 import type { Proxy } from '../types/proxy'
 import { uiPx } from '../utils/uiScale'
 
