@@ -62,6 +62,9 @@ type App struct {
 	favoriteStore        *store.FavoriteStore
 	syncService          *sync.SyncService
 	tunnelService        *session.TunnelService
+	tunnelStartsMu       stdsync.Mutex
+	tunnelStarts         map[string]*tunnelStartRequest
+	tunnelsClosed        bool
 	mainHwnd             uintptr
 	originalWndProc      uintptr
 	wndProcCb            uintptr // keep alive to prevent GC
@@ -137,6 +140,16 @@ type App struct {
 	// loading; the additive channel just makes the failure visible.
 	errCh      chan error
 	startupErr error
+}
+
+// A request owns cancellation while configuration and credentials are loading,
+// before the tunnel service has registered its connection lifecycle.
+type tunnelStartRequest struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+	done   chan struct{}
+	state  session.TunnelState
+	err    error
 }
 
 func NewApp(webviewDataPath string) *App {
@@ -335,12 +348,13 @@ func (a *App) initStores(dataDir string, upgrade bool) {
 	a.tunnelService.SetStateCallback(func(st session.TunnelState) {
 		a.emit("tunnel:state", st)
 	})
-	go a.autoStartTunnels()
 	go a.watchForeground(a.ctx)
 
 	// Credential store + auto-unlock / upgrade (wires PasswordStore into
 	// connection + settings stores).
 	a.initCredentials(dataDir, upgrade)
+	// Resolve saved tunnel credentials only after the credential store is ready.
+	go a.autoStartTunnels()
 
 	// Sync service: sync metadata (sync-config.json + local repo clone) lives
 	// in the system user-config dir; the config files it encrypts/decrypts are
@@ -761,6 +775,12 @@ func (a *App) shutdown() {
 	if a.mcpServer != nil {
 		a.mcpServer.Stop()
 	}
+	a.tunnelStartsMu.Lock()
+	a.tunnelsClosed = true
+	for _, request := range a.tunnelStarts {
+		request.cancel()
+	}
+	a.tunnelStartsMu.Unlock()
 	if a.tunnelService != nil {
 		a.tunnelService.Shutdown()
 	}
@@ -905,6 +925,26 @@ func (a *App) SaveTunnels(data session.TunnelStoreData) error {
 	}
 	err := a.tunnelStore.Save(data)
 	if err == nil {
+		// Cancel pending reconnects as well as live forwards when a tunnel is
+		// removed, including deletions saved by another window.
+		if a.tunnelService != nil {
+			kept := make(map[string]bool, len(data.Tunnels))
+			for _, tunnel := range data.Tunnels {
+				kept[tunnel.ID] = true
+			}
+			a.tunnelStartsMu.Lock()
+			for id, request := range a.tunnelStarts {
+				if !kept[id] {
+					request.cancel()
+				}
+			}
+			a.tunnelStartsMu.Unlock()
+			for _, state := range a.tunnelService.TunnelStates() {
+				if !kept[state.ID] {
+					a.tunnelService.StopTunnel(state.ID)
+				}
+			}
+		}
 		a.emit("store:tunnels:changed", data)
 	}
 	return err
@@ -1114,37 +1154,93 @@ func withExitCredOverride(resolve session.ConnResolver, exitID, user, password s
 // user/password carry inline credentials resolved by the frontend's credential
 // dialog for exit connections with nothing saved; they only fill empty fields.
 func (a *App) StartTunnel(id, user, password string) (session.TunnelState, error) {
-	if a.tunnelService == nil || a.tunnelStore == nil || a.connectionStore == nil {
-		return session.TunnelState{}, fmt.Errorf("tunnel service not initialized")
-	}
-	data, err := a.tunnelStore.Load()
-	if err != nil {
-		return session.TunnelState{}, err
-	}
-	var t *session.Tunnel
-	for i := range data.Tunnels {
-		if data.Tunnels[i].ID == id {
-			t = &data.Tunnels[i]
-			break
+	return a.startTunnel(id, user, password, false)
+}
+
+func (a *App) startTunnel(id, user, password string, autoStartOnly bool) (session.TunnelState, error) {
+	return a.runTunnelStart(id, func(ctx context.Context) (session.TunnelState, error) {
+		if a.tunnelService == nil || a.tunnelStore == nil || a.connectionStore == nil {
+			return session.TunnelState{}, fmt.Errorf("tunnel service not initialized")
 		}
+		data, err := a.tunnelStore.Load()
+		if err != nil {
+			return session.TunnelState{}, err
+		}
+		var t *session.Tunnel
+		for i := range data.Tunnels {
+			if data.Tunnels[i].ID == id {
+				t = &data.Tunnels[i]
+				break
+			}
+		}
+		if t == nil {
+			if autoStartOnly {
+				return session.TunnelState{ID: id, Status: session.TunnelStopped}, nil
+			}
+			return session.TunnelState{}, fmt.Errorf("tunnel %s not found", id)
+		}
+		if ctx.Err() != nil || (autoStartOnly && !t.AutoStart) {
+			return session.TunnelState{ID: id, Status: session.TunnelStopped}, nil
+		}
+		resolve, err := a.connResolver()
+		if err != nil {
+			return session.TunnelState{}, err
+		}
+		resolve = withExitCredOverride(resolve, t.SSHConnID, user, password)
+		st := a.tunnelService.StartTunnelContext(ctx, *t, resolve)
+		// A failed start is reported through the state (error, or reconnecting when
+		// automatic retries are enabled, with Error text);
+		// returning a Go error here too would turn the Wails call into a rejected
+		// promise and the frontend would lose the state it needs for the toast.
+		return st, nil
+	})
+}
+
+func (a *App) runTunnelStart(id string, start func(context.Context) (session.TunnelState, error)) (session.TunnelState, error) {
+	a.tunnelStartsMu.Lock()
+	if a.tunnelsClosed {
+		a.tunnelStartsMu.Unlock()
+		return session.TunnelState{ID: id, Status: session.TunnelStopped}, nil
 	}
-	if t == nil {
-		return session.TunnelState{}, fmt.Errorf("tunnel %s not found", id)
+	if existing := a.tunnelStarts[id]; existing != nil && existing.ctx.Err() == nil {
+		a.tunnelStartsMu.Unlock()
+		<-existing.done
+		return existing.state, existing.err
 	}
-	resolve, err := a.connResolver()
-	if err != nil {
-		return session.TunnelState{}, err
+	ctx, cancel := context.WithCancel(context.Background())
+	request := &tunnelStartRequest{ctx: ctx, cancel: cancel, done: make(chan struct{})}
+	if a.tunnelStarts == nil {
+		a.tunnelStarts = make(map[string]*tunnelStartRequest)
 	}
-	resolve = withExitCredOverride(resolve, t.SSHConnID, user, password)
-	st := a.tunnelService.StartTunnel(*t, resolve)
-	// A failed start is reported through the state (Status=Error + Error text);
-	// returning a Go error here too would turn the Wails call into a rejected
-	// promise and the frontend would lose the state it needs for the toast.
-	return st, nil
+	a.tunnelStarts[id] = request
+	a.tunnelStartsMu.Unlock()
+	defer func() {
+		a.tunnelStartsMu.Lock()
+		if a.tunnelStarts[id] == request {
+			delete(a.tunnelStarts, id)
+		}
+		close(request.done)
+		a.tunnelStartsMu.Unlock()
+	}()
+	request.state, request.err = start(ctx)
+	if ctx.Err() != nil {
+		request.state, request.err = session.TunnelState{ID: id, Status: session.TunnelStopped}, nil
+	}
+	// The service retains ctx for a running/retrying lifecycle. Cancelling it
+	// here would stop a successful start as soon as its RPC returned.
+	if request.err != nil || request.state.Status == session.TunnelStopped || request.state.Status == session.TunnelError {
+		cancel()
+	}
+	return request.state, request.err
 }
 
 // StopTunnel tears down the tunnel with the given ID.
 func (a *App) StopTunnel(id string) error {
+	a.tunnelStartsMu.Lock()
+	if request := a.tunnelStarts[id]; request != nil {
+		request.cancel()
+	}
+	a.tunnelStartsMu.Unlock()
 	if a.tunnelService != nil {
 		a.tunnelService.StopTunnel(id)
 	}
@@ -1190,13 +1286,14 @@ func (a *App) autoStartTunnels() {
 	if err != nil {
 		return
 	}
-	resolve, err := a.connResolver()
-	if err != nil {
-		return
-	}
 	for _, t := range data.Tunnels {
 		if t.AutoStart {
-			if st := a.tunnelService.StartTunnel(t, resolve); st.Status == session.TunnelError {
+			// A previous connection may take time to establish. Re-read this
+			// definition so a tunnel deleted or disabled meanwhile stays stopped.
+			st, err := a.startTunnel(t.ID, "", "", true)
+			if err != nil {
+				log.Writef("auto-start tunnel %s (%s): %v", t.Name, t.ID, err)
+			} else if st.Error != "" {
 				// The failure also reaches the frontend via the tunnel:state
 				// event; the log keeps a trace for diagnostics.
 				log.Writef("auto-start tunnel %s (%s): %s", t.Name, t.ID, st.Error)
