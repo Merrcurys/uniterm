@@ -584,6 +584,10 @@ func (a *App) saveWindowStateFromRuntime() {
 	if a.localStateStore == nil {
 		return
 	}
+	// Server mode (headless): no window to query.
+	if a.window == nil {
+		return
+	}
 	// Do not save geometry when minimised — the position is off-screen
 	// (-32000, -32000 on Windows) and the size is the tiny taskbar thumbnail,
 	// which would restore incorrectly.
@@ -777,6 +781,9 @@ func (a *App) watchForeground(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if a.ctx == nil {
+				continue
+			}
+			if a.window == nil {
 				continue
 			}
 			visible := !a.win().IsMinimised()
