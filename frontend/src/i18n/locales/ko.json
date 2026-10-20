@@ -572,7 +572,7 @@
   "settings.modelUserAgent": "User-Agent",
   "settings.modelProxyPlaceholder": "프록시 사용 안 함 (직접 연결)",
   "settings.modelProtocol": "프로토콜",
-  "settings.cancel": "취소",
+  "settings.modelPresetPlaceholder": "사전 설정 선택 (선택 사항)",  "settings.cancel": "취소",
   "settings.save": "저장",
   "settings.historySearchPlaceholder": "기록 명령어 검색...",
   "settings.historyEmpty": "기록이 없습니다",

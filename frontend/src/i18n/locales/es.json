@@ -572,7 +572,7 @@
   "settings.modelUserAgent": "User-Agent",
   "settings.modelProxyPlaceholder": "Sin proxy (conexión directa)",
   "settings.modelProtocol": "Protocolo",
-  "settings.cancel": "Cancelar",
+  "settings.modelPresetPlaceholder": "Seleccionar preajuste (opcional)",  "settings.cancel": "Cancelar",
   "settings.save": "Guardar",
   "settings.historySearchPlaceholder": "Buscar comandos del historial...",
   "settings.historyEmpty": "No hay registros del historial",

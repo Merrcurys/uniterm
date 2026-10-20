@@ -572,7 +572,7 @@
   "settings.modelUserAgent": "ユーザーエージェント",
   "settings.modelProxyPlaceholder": "プロキシを使用しない（直接接続）",
   "settings.modelProtocol": "プロトコル",
-  "settings.cancel": "キャンセル",
+  "settings.modelPresetPlaceholder": "プリセットを選択（任意）",  "settings.cancel": "キャンセル",
   "settings.save": "保存",
   "settings.historySearchPlaceholder": "履歴コマンドを検索...",
   "settings.historyEmpty": "履歴がありません",

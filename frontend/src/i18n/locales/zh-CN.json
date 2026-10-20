@@ -572,6 +572,7 @@
   "settings.modelUserAgent": "User-Agent",
   "settings.modelProxyPlaceholder": "不使用代理（直连）",
   "settings.modelProtocol": "协议",
+  "settings.modelPresetPlaceholder": "选择预设快速配置（可选）",
   "settings.cancel": "取消",
   "settings.save": "保存",
   "settings.historySearchPlaceholder": "搜索历史命令...",

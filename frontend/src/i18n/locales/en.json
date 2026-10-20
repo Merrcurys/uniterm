@@ -572,6 +572,7 @@
   "settings.modelUserAgent": "User-Agent",
   "settings.modelProxyPlaceholder": "No proxy (direct connection)",
   "settings.modelProtocol": "Protocol",
+  "settings.modelPresetPlaceholder": "Select a preset for quick setup (optional)",
   "settings.cancel": "Cancel",
   "settings.save": "Save",
   "settings.historySearchPlaceholder": "Search history commands...",

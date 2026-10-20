@@ -572,7 +572,7 @@
   "settings.modelUserAgent": "User-Agent",
   "settings.modelProxyPlaceholder": "Без прокси (напрямую)",
   "settings.modelProtocol": "Протокол",
-  "settings.cancel": "Отмена",
+  "settings.modelPresetPlaceholder": "Выбрать пресет (опц.)",  "settings.cancel": "Отмена",
   "settings.save": "Сохранить",
   "settings.historySearchPlaceholder": "Поиск по истории команд...",
   "settings.historyEmpty": "История пуста",
