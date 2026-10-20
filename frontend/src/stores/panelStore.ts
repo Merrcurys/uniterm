@@ -110,10 +110,15 @@ export const usePanelStore = defineStore('panel', () => {
     if (!p) return
     const prev = p.sessionId
     p.sessionId = sessionId
-    // shallowReactive does not track deep property mutations on Map values,
-    // so re-set the entry to trigger reactive updates (issue: database tree
-    // not loading on first connect because props.sessionId never updated).
+    // shallowReactive does not track deep property mutations on Map values.
+    // Re-setting the same object reference is a no-op (Vue checks oldValue ===
+    // value), so we must delete + set to force the Map trigger.  Without this,
+    // the database tree panel never loads on first connect: the tab opens with
+    // sessionId='' before CreateSession completes, and bindSession's mutation
+    // is invisible to Vue's reactivity system.
+    panelState.panels.delete(panelId)
     panelState.panels.set(panelId, p)
+    console.log('[panelStore] bindSession:', { panelId, prev, sessionId })
     // Tell the backend which panel this session belongs to so per-panel
     // output logging survives reconnects. The previous session's binding
     // is dropped best-effort — if it's already gone the backend no-ops.
@@ -129,6 +134,7 @@ export const usePanelStore = defineStore('panel', () => {
     const p = panelState.panels.get(panelId)
     if (p) {
       p.status = status
+      panelState.panels.delete(panelId)
       panelState.panels.set(panelId, p)
     }
   }
@@ -137,6 +143,7 @@ export const usePanelStore = defineStore('panel', () => {
     const p = panelState.panels.get(panelId)
     if (!p) return
     p.title = makeTitleUnique(title, panelId)
+    panelState.panels.delete(panelId)
     panelState.panels.set(panelId, p)
   }
 
@@ -144,6 +151,7 @@ export const usePanelStore = defineStore('panel', () => {
     const p = panelState.panels.get(panelId)
     if (p) {
       p.outputLog = state
+      panelState.panels.delete(panelId)
       panelState.panels.set(panelId, p)
     }
   }
@@ -152,6 +160,7 @@ export const usePanelStore = defineStore('panel', () => {
     const p = panelState.panels.get(panelId)
     if (p) {
       p.tabId = tabId
+      panelState.panels.delete(panelId)
       panelState.panels.set(panelId, p)
     }
   }

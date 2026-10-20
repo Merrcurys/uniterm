@@ -234,10 +234,12 @@ const loading = ref(false)
 const treeContentRef = ref<HTMLElement | null>(null)
 
 async function loadTree() {
+  console.log('[DBTreePanel] loadTree called, sessionId:', props.sessionId)
   if (!props.sessionId) return
   loading.value = true
   try {
     const dbs = await GetDatabases(props.sessionId)
+    console.log('[DBTreePanel] GetDatabases returned:', dbs)
     // Auto-expand the connection's default db only when it's actually a real
     // entry in the list. For databases where the configured "dbName" is not a
     // browsable namespace (e.g. Oracle's service name), it won't match and we
@@ -272,6 +274,7 @@ async function loadTree() {
 }
 
 watch(() => props.sessionId, (newId) => {
+  console.log('[DBTreePanel] sessionId watch fired, newId:', newId)
   if (newId) loadTree()
 }, { immediate: true })
 
