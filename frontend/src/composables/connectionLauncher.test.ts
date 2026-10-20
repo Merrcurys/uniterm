@@ -76,6 +76,21 @@ describe('launchConnection persistence', () => {
 })
 
 describe('launchConnection routing', () => {
+  for (const obsoleteEngine of [undefined, 'microsoft', 'ironrdp']) {
+    it(`opens a canonical RDP tab and preserves its proxy/settings (legacy engine=${obsoleteEngine})`, async () => {
+      createSessionMock.mockResolvedValue({ id: 'rdp-session', proxyAddr: 'ws://127.0.0.1:1234/token' })
+      const cfg = { ...baseConfig('rdp'), rdpEngine: obsoleteEngine, rdpEnableNLA: true, rdpAdminSession: true }
+      await launchConnection(cfg, { persist: false })
+      expect(createSessionMock).toHaveBeenCalledWith('rdp', expect.objectContaining({ rdpEnableNLA: true, rdpAdminSession: true }))
+      const tab = useTabStore().tabs.at(-1)!
+      expect(tab.type).toBe('rdp')
+      const panelId = (tab as any).panelId
+      expect(usePanelStore().getPanel(panelId)?.type).toBe('rdp')
+      expect(usePanelStore().getPanel(panelId)?.sessionId).toBe('rdp-session')
+      expect(usePanelStore().getProxyAddr(panelId)).toBe('ws://127.0.0.1:1234/token')
+    })
+  }
+
   const cases: [string, string][] = [
     ['sftp', 'sftp'],
     ['scp', 'scp'],

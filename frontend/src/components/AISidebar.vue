@@ -853,11 +853,11 @@ function toggleMaximize() {
   if (isMaximized.value) {
     sidebarWidth.value = preMaxWidth.value
     isMaximized.value = false
-    window.dispatchEvent(new CustomEvent('rdp:overlay-pop'))
+
   } else {
     preMaxWidth.value = sidebarWidth.value
     isMaximized.value = true
-    window.dispatchEvent(new CustomEvent('rdp:overlay-push'))
+
   }
 }
 
@@ -865,7 +865,7 @@ function onClose() {
   if (isMaximized.value) {
     isMaximized.value = false
     sidebarWidth.value = preMaxWidth.value
-    window.dispatchEvent(new CustomEvent('rdp:overlay-pop'))
+
   }
   aiStore.toggle()
 }
@@ -1566,7 +1566,7 @@ watch(() => aiStore.visible, (visible) => {
   if (!visible && isMaximized.value) {
     isMaximized.value = false
     sidebarWidth.value = preMaxWidth.value
-    window.dispatchEvent(new CustomEvent('rdp:overlay-pop'))
+
   }
 })
 

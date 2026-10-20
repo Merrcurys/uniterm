@@ -578,10 +578,6 @@ function openThemeEditor(sourceThemeId?: string) {
   themeEditorVisible.value = true
 }
 
-// Notify App.vue to hide native RDP window when edit dialog opens
-watch(showForm, (val) => {
-  window.dispatchEvent(new CustomEvent(val ? 'rdp:overlay-push' : 'rdp:overlay-pop'))
-})
 
 const searchQuery = ref('')
 const searchInputRef = ref<any>(null)

@@ -51,7 +51,6 @@ export interface ConnectionConfig {
   // the backend reconnects with the new size after it stays stable).
   rdpFixedWidth?: number
   rdpFixedHeight?: number
-  rdpSmartSizing?: boolean
   rdpEnableNLA?: boolean
   // Windows domain (or computer name for local accounts). When empty, a
   // "DOMAIN\user" prefix in user is used as a fallback.

@@ -1,5 +1,5 @@
 <template>
-  <div class="vnc-tab-content">
+  <div ref="container" class="vnc-tab-content" :class="{ 'is-fullscreen': isFullscreen }">
     <!-- Connecting state -->
     <div v-if="status === 'connecting'" class="vnc-overlay">
       <el-icon class="is-loading" :size="'2rem'"><Loader /></el-icon>
@@ -29,7 +29,7 @@
     />
 
     <!-- Status bar -->
-    <div v-show="status === 'connected'" class="vnc-statusbar">
+    <div v-show="status === 'connected' && !isFullscreen" class="vnc-statusbar">
       <span class="vnc-status-dot" />
       <span>{{ t('vnc.connected') }}</span>
       <span class="vnc-status-sep">|</span>
@@ -61,13 +61,27 @@
         :inactive-text="t('vnc.scaleOff')"
         style="--el-switch-on-color: var(--success); --el-switch-off-color: var(--text-disabled)"
       />
+      <span class="vnc-status-spacer" />
+      <button class="vnc-fullscreen-btn" @click="toggleFullscreen">{{ t('remoteDesktop.fullscreen') }}</button>
     </div>
+    <RemoteDesktopToolbar
+      v-if="isFullscreen"
+      v-model:scale-viewport="scaleViewport"
+      :host="config?.host || ''"
+      :port="config?.port || 5900"
+      :disabled="status !== 'connected'"
+      @restore="toggleFullscreen"
+      @focus-desktop="focusDesktop"
+      @minimize="blurDesktop"
+      @error="onToolbarError"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { Loader } from '@lucide/vue'
+import RemoteDesktopToolbar from './RemoteDesktopToolbar.vue'
 import { useI18n } from '../i18n'
 import { usePanelStore } from '../stores/panelStore'
 import { useSessionStore } from '../stores/sessionStore'
@@ -87,6 +101,8 @@ const props = defineProps<{
 const status = ref<'connecting' | 'connected' | 'disconnected' | 'error'>('disconnected')
 const lastError = ref<string>('')
 const currentSessionId = ref<string | null>(props.sessionId)
+const container = ref<HTMLDivElement | null>(null)
+const isFullscreen = ref(false)
 const vncContainer = ref<HTMLDivElement | null>(null)
 const savedPassword = ref<string>('')
 const scaleViewport = ref(true)
@@ -278,7 +294,41 @@ function onReconnectEvent(e: Event) {
   if (panelId && panelId === props.panelId) reconnect()
 }
 
+function focusDesktop() {
+  if (status.value === 'connected') rfb?.focus({ preventScroll: true })
+}
+
+function blurDesktop() {
+  rfb?.blur()
+}
+
+function onToolbarError(error: unknown) {
+  console.error('VNC minimize error:', error)
+}
+
+function onFullscreenChange() {
+  isFullscreen.value = document.fullscreenElement === container.value
+}
+
+async function toggleFullscreen() {
+  const el = container.value
+  if (!el) return
+  try {
+    if (document.fullscreenElement === el) await document.exitFullscreen()
+    else await el.requestFullscreen()
+    focusDesktop()
+  } catch (error) {
+    console.error('VNC fullscreen error:', error)
+  }
+}
+
+function onFullscreenEvent(event: Event) {
+  if ((event as CustomEvent<{ panelId: string }>).detail?.panelId === props.panelId) void toggleFullscreen()
+}
+
 onMounted(() => {
+  document.addEventListener('fullscreenchange', onFullscreenChange)
+  window.addEventListener('vnc:fullscreen', onFullscreenEvent)
   if (props.sessionId) {
     currentSessionId.value = props.sessionId
   }
@@ -342,6 +392,8 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  document.removeEventListener('fullscreenchange', onFullscreenChange)
+  window.removeEventListener('vnc:fullscreen', onFullscreenEvent)
   themeObserver?.disconnect()
   themeObserver = null
   unsubStatus?.()
@@ -398,6 +450,10 @@ watch(showDotCursor, (val) => {
   display: block;
   flex-shrink: 0;
 }
+.vnc-tab-content.is-fullscreen .vnc-area,
+.vnc-tab-content.is-fullscreen .vnc-overlay {
+  bottom: 0;
+}
 .vnc-overlay {
   position: absolute;
   inset: 0;
@@ -442,4 +498,17 @@ watch(showDotCursor, (val) => {
 }
 .vnc-status-sep { color: var(--text-disabled); }
 .vnc-status-label { font-size: 0.6875rem; }
+.vnc-status-spacer { flex: 1; }
+.vnc-fullscreen-btn {
+  border: 1px solid var(--border-default);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  padding: 1px 0.625rem;
+  border-radius: var(--radius-sm);
+}
+.vnc-fullscreen-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
 </style>

@@ -175,3 +175,23 @@ func applyTrayIcon(tray *application.SystemTray) {
 func trayIconPNG() []byte {
 	return appIconTrayPNG
 }
+
+// Non-Windows stubs: reading the local clipboard's file list (CF_HDROP) has
+// no portable implementation, so the IronRDP engine's local→remote file paste
+// stays Windows-only; text clipboard is unaffected.
+
+func (a *App) ClipboardGetFiles() []ClipboardFileInfo {
+	return []ClipboardFileInfo{}
+}
+
+func (a *App) ClipboardReadFileChunk(index int, offset int64, size int) (string, error) {
+	return "", fmt.Errorf("clipboard file transfer is only supported on Windows")
+}
+
+func (a *App) setClipboardFiles(paths []string) error {
+	return fmt.Errorf("clipboard file transfer is only supported on Windows")
+}
+
+func (a *App) ClipboardReadFileChunkByID(id string, offset int64, size int) (string, error) {
+	return "", fmt.Errorf("clipboard file transfer is only supported on Windows")
+}

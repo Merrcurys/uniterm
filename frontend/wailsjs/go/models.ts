@@ -691,8 +691,11 @@ export namespace session {
 	    groupId?: string;
 	    rdpFixedWidth?: number;
 	    rdpFixedHeight?: number;
-	    rdpSmartSizing: boolean;
+	    rdpDomain?: string;
 	    rdpEnableNLA: boolean;
+	    rdpAdminSession: boolean;
+
+
 	    shellPath?: string;
 	    cwd?: string;
 	    serialPort?: string;
@@ -772,8 +775,11 @@ export namespace session {
 	        this.groupId = source["groupId"];
 	        this.rdpFixedWidth = source["rdpFixedWidth"];
 	        this.rdpFixedHeight = source["rdpFixedHeight"];
-	        this.rdpSmartSizing = source["rdpSmartSizing"];
+	        this.rdpDomain = source["rdpDomain"];
 	        this.rdpEnableNLA = source["rdpEnableNLA"];
+	        this.rdpAdminSession = source["rdpAdminSession"];
+
+
 	        this.shellPath = source["shellPath"];
 	        this.cwd = source["cwd"];
 	        this.serialPort = source["serialPort"];

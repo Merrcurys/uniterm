@@ -105,7 +105,6 @@ type ConnectionConfig struct {
 	// with the new size so the server renders at the window's resolution.
 	RdpFixedWidth  int  `json:"rdpFixedWidth,omitempty"`
 	RdpFixedHeight int  `json:"rdpFixedHeight,omitempty"`
-	RdpSmartSizing bool `json:"rdpSmartSizing"`
 	RdpEnableNLA   bool `json:"rdpEnableNLA"`
 	// RdpDomain is the Windows domain (or computer name for local accounts)
 	// sent to the RDP ActiveX control's Domain property. When empty, a
