@@ -1280,6 +1280,8 @@
   "conn.ftpSkipVerify": "Unsicheres TLS erlauben (Verifizierung überspringen)",
   "conn.ftpSkipVerifyDesc": "Deaktiviert die Zertifikatsverifizierung für FTPS. Anfällig für MITM-Angriffe – nur für vertrauenswürdige selbstsignierte Zertifikate aktivieren.",
   "conn.vncShared": "Gemeinsame Sitzung",
+  "conn.vncClipboardEncoding": "Zwischenablage-Kodierung",
+  "conn.vncClipboardEncodingDefault": "Automatische Aushandlung",
   "conn.vncRepeaterID": "Repeater-ID",
   "conn.vncRepeaterIDPlaceholder": "z.B. meinrechner",
   "conn.encoding": "Kodierung",

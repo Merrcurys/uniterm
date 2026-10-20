@@ -24,7 +24,9 @@ export class RdpClipboardSync {
   private lastKey: string | undefined
   private tail: Promise<void> = Promise.resolve()
 
-  constructor(private readonly bridge: ClipboardBridge) {}
+  constructor(private readonly bridge: ClipboardBridge, initiallyReady = false) {
+    this.ready = initiallyReady
+  }
 
   private enqueue(action: () => Promise<void>): Promise<void> {
     const result = this.tail.then(action)

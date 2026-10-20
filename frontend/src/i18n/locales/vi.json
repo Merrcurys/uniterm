@@ -1273,6 +1273,8 @@
   "conn.ftpSkipVerify": "Cho phép TLS không an toàn (bỏ qua xác minh)",
   "conn.ftpSkipVerifyDesc": "Tắt xác minh chứng chỉ cho FTPS. Dễ bị tấn công MITM — chỉ bật cho các chứng chỉ tự ký đáng tin cậy.",
   "conn.vncShared": "Phiên dùng chung",
+  "conn.vncClipboardEncoding": "Mã hóa bảng nhớ tạm",
+  "conn.vncClipboardEncodingDefault": "Tự động thương lượng",
   "conn.vncRepeaterID": "Repeater ID",
   "conn.vncRepeaterIDPlaceholder": "vd. mymachine",
   "conn.encoding": "Bảng mã",

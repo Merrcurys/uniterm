@@ -12,7 +12,37 @@ import (
 	"github.com/google/uuid"
 	"github.com/ys-ll/uniterm/backend/platform"
 	"github.com/ys-ll/uniterm/backend/session"
+	"golang.org/x/text/encoding"
+	"golang.org/x/text/encoding/japanese"
+	"golang.org/x/text/encoding/korean"
+	"golang.org/x/text/encoding/simplifiedchinese"
+	"golang.org/x/text/encoding/traditionalchinese"
 )
+
+func (a *App) EncodeVNCClipboardText(text, charset string) (string, error) {
+	var codec encoding.Encoding
+	switch charset {
+	case "gbk", "gb2312":
+		codec = simplifiedchinese.GBK
+	case "gb18030":
+		codec = simplifiedchinese.GB18030
+	case "big5":
+		codec = traditionalchinese.Big5
+	case "shift-jis":
+		codec = japanese.ShiftJIS
+	case "euc-jp":
+		codec = japanese.EUCJP
+	case "euc-kr":
+		codec = korean.EUCKR
+	default:
+		return "", fmt.Errorf("unsupported VNC clipboard encoding: %q", charset)
+	}
+	data, err := codec.NewEncoder().Bytes([]byte(text))
+	if err != nil {
+		return "", fmt.Errorf("encode VNC clipboard as %s: %w", charset, err)
+	}
+	return base64.StdEncoding.EncodeToString(data), nil
+}
 
 // X11DesktopConnect starts an x11-desktop session: looks up the saved
 // connection config (which carries its own SSH credentials), opens an
@@ -194,6 +224,14 @@ func (a *App) ClipboardAbortFileTransfer(id string) error {
 // SetRDPKeyboardCapture is enabled only while the connected WASM desktop has
 // focus. The capture token also identifies events queued before a focus change.
 func (a *App) SetRDPKeyboardCapture(sessionID, captureID string, enabled bool) (bool, error) {
+	return a.setDesktopKeyboardCapture(sessionID, captureID, enabled, "rdp")
+}
+
+func (a *App) SetVNCKeyboardCapture(sessionID, captureID string, enabled bool) (bool, error) {
+	return a.setDesktopKeyboardCapture(sessionID, captureID, enabled, "vnc")
+}
+
+func (a *App) setDesktopKeyboardCapture(sessionID, captureID string, enabled bool, sessionType string) (bool, error) {
 	a.rdpKeyboardMu.Lock()
 	defer a.rdpKeyboardMu.Unlock()
 	if !enabled {
@@ -203,19 +241,19 @@ func (a *App) SetRDPKeyboardCapture(sessionID, captureID string, enabled bool) (
 		return false, nil
 	}
 	if captureID == "" || a.sessionManager == nil {
-		return false, fmt.Errorf("RDP session unavailable")
+		return false, fmt.Errorf("%s session unavailable", strings.ToUpper(sessionType))
 	}
 	s, ok := a.sessionManager.Get(sessionID)
 	if !ok {
-		return false, fmt.Errorf("RDP session unavailable")
+		return false, fmt.Errorf("%s session unavailable", strings.ToUpper(sessionType))
 	}
-	if _, ok := s.(*session.RDPSession); !ok || s.Status() != session.StatusConnected {
-		return false, fmt.Errorf("RDP session is not connected")
+	if s.Type() != sessionType || s.Status() != session.StatusConnected {
+		return false, fmt.Errorf("%s session is not connected", strings.ToUpper(sessionType))
 	}
 	if a.rdpKeyboard == nil {
 		capture, err := platform.NewRDPKeyboardCapture(func(event platform.RDPKeyEvent) {
 			if a.app != nil {
-				a.app.Event.Emit("rdp:keyboard", event)
+				a.app.Event.Emit("remote-desktop:keyboard", event)
 			}
 		})
 		if err != nil {
@@ -226,6 +264,9 @@ func (a *App) SetRDPKeyboardCapture(sessionID, captureID string, enabled bool) (
 	hwnd := a.mainHwnd
 	if hwnd == 0 {
 		hwnd = a.findMainWindow()
+	}
+	if sessionType == "vnc" {
+		return a.rdpKeyboard.SetShortcutCapture(captureID, hwnd), nil
 	}
 	return a.rdpKeyboard.SetCapture(captureID, hwnd), nil
 }

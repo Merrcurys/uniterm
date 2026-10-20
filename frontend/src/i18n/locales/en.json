@@ -1273,6 +1273,8 @@
   "conn.ftpSkipVerify": "Allow insecure TLS (skip verification)",
   "conn.ftpSkipVerifyDesc": "Disables certificate verification for FTPS. Vulnerable to MITM attacks — only enable for trusted self-signed certificates.",
   "conn.vncShared": "Shared session",
+  "conn.vncClipboardEncoding": "Clipboard encoding",
+  "conn.vncClipboardEncodingDefault": "Automatic negotiation",
   "conn.vncRepeaterID": "Repeater ID",
   "conn.vncRepeaterIDPlaceholder": "e.g. mymachine",
   "conn.encoding": "Encoding",

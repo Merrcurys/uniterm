@@ -20,6 +20,21 @@ function fixture() {
 }
 
 describe('RDP clipboard synchronization', () => {
+  it('can synchronize VNC text without waiting for an RDP handshake', async () => {
+    const bridge = {
+      read: vi.fn(async () => ({ kind: 'text' as const, text: 'local VNC text' })),
+      publish: vi.fn(async () => {}),
+      writeText: vi.fn(async () => true),
+    }
+    const sync = new RdpClipboardSync(bridge, true)
+    await sync.sync()
+    expect(bridge.publish).toHaveBeenCalledWith({ kind: 'text', text: 'local VNC text' })
+    bridge.publish.mockClear()
+    await sync.receiveText('remote VNC text')
+    bridge.read.mockResolvedValue({ kind: 'text', text: 'remote VNC text' })
+    await sync.sync()
+    expect(bridge.publish).not.toHaveBeenCalled()
+  })
   it('waits for MonitorReady and initializes even with an empty clipboard', async () => {
     const f = fixture()
     await f.sync.sync()

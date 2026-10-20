@@ -39,17 +39,18 @@ type rdpKeyboardMessage struct {
 // The hook runs on a dedicated Windows message thread. Its callback only
 // updates state and enqueues events; Wails dispatch never blocks the hook.
 type RDPKeyboardCapture struct {
-	mu       sync.Mutex
-	state    rdpKeyboardState
-	hwnd     uintptr
-	threadID uint32
-	callback uintptr
-	closed   bool
-	expires  time.Time
-	queue    []RDPKeyEvent
-	wake     chan struct{}
-	done     chan struct{}
-	emit     func(RDPKeyEvent)
+	mu            sync.Mutex
+	state         rdpKeyboardState
+	hwnd          uintptr
+	threadID      uint32
+	callback      uintptr
+	closed        bool
+	shortcutsOnly bool
+	expires       time.Time
+	queue         []RDPKeyEvent
+	wake          chan struct{}
+	done          chan struct{}
+	emit          func(RDPKeyEvent)
 }
 
 func NewRDPKeyboardCapture(emit func(RDPKeyEvent)) (*RDPKeyboardCapture, error) {
@@ -79,6 +80,14 @@ func (c *RDPKeyboardCapture) reset() {
 }
 
 func (c *RDPKeyboardCapture) SetCapture(id string, hwnd uintptr) bool {
+	return c.setCapture(id, hwnd, false)
+}
+
+func (c *RDPKeyboardCapture) SetShortcutCapture(id string, hwnd uintptr) bool {
+	return c.setCapture(id, hwnd, true)
+}
+
+func (c *RDPKeyboardCapture) setCapture(id string, hwnd uintptr, shortcutsOnly bool) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed || hwnd == 0 {
@@ -86,11 +95,12 @@ func (c *RDPKeyboardCapture) SetCapture(id string, hwnd uintptr) bool {
 	}
 	// A crashed/reloaded WebView must not keep swallowing local input.
 	c.expires = time.Now().Add(3 * time.Second)
-	if c.state.captureID == id && c.hwnd == hwnd {
+	if c.state.captureID == id && c.hwnd == hwnd && c.shortcutsOnly == shortcutsOnly {
 		return true
 	}
 	c.reset()
 	c.hwnd = hwnd
+	c.shortcutsOnly = shortcutsOnly
 	c.state.activate(id)
 	return true
 }
@@ -156,8 +166,13 @@ func (c *RDPKeyboardCapture) run(ready chan<- error) {
 			if !active {
 				c.reset()
 			}
-			event, swallow := c.state.key(scan, down, active, data.VKCode == 0x7b) // F12
+			local := data.VKCode == 0x7b
+			if c.shortcutsOnly && !c.state.shortcutKey(scan, data.Flags&0x20 != 0) {
+				local = true
+			}
+			event, swallow := c.state.key(scan, down, active, local) // F12
 			if event.CaptureID != "" {
+				event.VirtualKey = data.VKCode
 				c.enqueue(event)
 			}
 			c.mu.Unlock()

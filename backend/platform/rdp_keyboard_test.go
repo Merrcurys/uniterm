@@ -2,6 +2,35 @@ package platform
 
 import "testing"
 
+func TestVNCKeyboardShortcutCapture(t *testing.T) {
+	var state rdpKeyboardState
+	state.activate("vnc")
+	for _, scan := range []uint16{0x1e, 0x1d, 0x2a, 0xe038, 0x0f} {
+		if state.shortcutKey(scan, false) {
+			t.Fatalf("ordinary typing/AltGr must stay with noVNC: %x", scan)
+		}
+	}
+	for _, chord := range [][]uint16{{0x38, 0x2a, 0x0f}, {0xe05b, 0x12}, {0xe05c}, {0x38, 0x3e}} {
+		for _, scan := range chord {
+			if !state.shortcutKey(scan, false) {
+				t.Fatalf("shortcut down was not captured: %x", scan)
+			}
+			if _, swallow := state.key(scan, true, true, false); !swallow {
+				t.Fatal("shortcut was allowed to reach Windows")
+			}
+		}
+		for _, scan := range chord {
+			if !state.shortcutKey(scan, false) {
+				t.Fatalf("held shortcut release was not captured: %x", scan)
+			}
+			state.key(scan, false, true, false)
+		}
+	}
+	if !state.shortcutKey(0x0f, true) {
+		t.Fatal("right-Alt+Tab must also be captured")
+	}
+}
+
 func TestRDPKeyboardRemoteChords(t *testing.T) {
 	for _, chord := range []struct {
 		name  string

@@ -1273,6 +1273,8 @@
   "conn.ftpSkipVerify": "安全でない TLS を許可する（検証をスキップ）",
   "conn.ftpSkipVerifyDesc": "FTPS の証明書検証を無効化します。MITM 攻撃に対して脆弱になるため、信頼できる自己署名証明書に対してのみ有効にしてください。",
   "conn.vncShared": "共有セッション",
+  "conn.vncClipboardEncoding": "クリップボードの文字コード",
+  "conn.vncClipboardEncodingDefault": "自動ネゴシエーション",
   "conn.vncRepeaterID": "リピーターID",
   "conn.vncRepeaterIDPlaceholder": "例: mymachine",
   "conn.encoding": "エンコーディング",

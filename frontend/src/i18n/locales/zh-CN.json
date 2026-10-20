@@ -1273,6 +1273,8 @@
   "conn.ftpSkipVerify": "允许不安全的 TLS（跳过证书校验）",
   "conn.ftpSkipVerifyDesc": "关闭 FTPS 的证书校验。容易被中间人攻击，仅在自签名证书等可信场景下开启。",
   "conn.vncShared": "共享会话",
+  "conn.vncClipboardEncoding": "剪贴板编码",
+  "conn.vncClipboardEncodingDefault": "自动协商",
   "conn.vncRepeaterID": "Repeater ID",
   "conn.vncRepeaterIDPlaceholder": "例如 mymachine",
   "conn.encoding": "字符编码",

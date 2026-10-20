@@ -119,6 +119,7 @@ export interface ConnectionConfig {
   // Empty (default) — direct connection to the VNC server.
   // Non-empty — connect via an UltraVNC-compatible repeater using the given ID.
   vncRepeaterID?: string
+  vncClipboardEncoding?: 'auto' | 'latin1' | 'utf-8' | 'gbk' | 'gb2312' | 'gb18030' | 'big5' | 'shift-jis' | 'euc-jp' | 'euc-kr'
   // SMB-specific
   smbDomain?: string
   smbShare?: string

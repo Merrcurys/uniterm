@@ -1280,6 +1280,8 @@
   "conn.ftpSkipVerify": "Разрешить небезопасный TLS (пропуск проверки)",
   "conn.ftpSkipVerifyDesc": "Отключает проверку сертификата для FTPS. Уязвимо к MITM-атакам — включайте только для доверенных самоподписанных сертификатов.",
   "conn.vncShared": "Общий сеанс",
+  "conn.vncClipboardEncoding": "Кодировка буфера обмена",
+  "conn.vncClipboardEncodingDefault": "Автоматическое согласование",
   "conn.vncRepeaterID": "ID ретранслятора",
   "conn.vncRepeaterIDPlaceholder": "напр. мойкомпьютер",
   "conn.encoding": "Кодировка",

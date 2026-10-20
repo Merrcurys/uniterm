@@ -3,19 +3,31 @@ package platform
 // RDPKeyEvent carries physical XT set-1 scan codes, including the E0 prefix.
 // CaptureID prevents queued events from crossing focus changes or reconnects.
 type RDPKeyEvent struct {
-	CaptureID string `json:"captureID"`
-	Scancode  uint16 `json:"scancode"`
-	Down      bool   `json:"down"`
-	Repeat    bool   `json:"repeat"`
-	Ctrl      bool   `json:"ctrl"`
-	Shift     bool   `json:"shift"`
-	Meta      bool   `json:"meta"`
-	Reset     bool   `json:"reset"`
+	CaptureID  string `json:"captureID"`
+	Scancode   uint16 `json:"scancode"`
+	Down       bool   `json:"down"`
+	Repeat     bool   `json:"repeat"`
+	Ctrl       bool   `json:"ctrl"`
+	Shift      bool   `json:"shift"`
+	Meta       bool   `json:"meta"`
+	Reset      bool   `json:"reset"`
+	VirtualKey uint32 `json:"virtualKey,omitempty"`
 }
 
 type rdpKeyboardState struct {
 	captureID string
 	pressed   map[uint16]string
+}
+
+func (s *rdpKeyboardState) shortcutKey(scan uint16, altDown bool) bool {
+	if _, held := s.pressed[scan]; held {
+		return true
+	}
+	if scan == 0xe05b || scan == 0xe05c || scan == 0x38 || scan == 0x0f && altDown {
+		return true
+	}
+	return s.captureID != "" && (s.pressed[0x38] == s.captureID ||
+		s.pressed[0xe05b] == s.captureID || s.pressed[0xe05c] == s.captureID)
 }
 
 func (s *rdpKeyboardState) activate(id string) {

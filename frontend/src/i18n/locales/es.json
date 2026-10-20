@@ -1280,6 +1280,8 @@
   "conn.ftpSkipVerify": "Permitir TLS inseguro (omitir verificación)",
   "conn.ftpSkipVerifyDesc": "Desactiva la verificación de certificados para FTPS. Vulnerable a ataques MITM: actívelo solo con certificados autofirmados de confianza.",
   "conn.vncShared": "Sesión compartida",
+  "conn.vncClipboardEncoding": "Codificación del portapapeles",
+  "conn.vncClipboardEncodingDefault": "Negociación automática",
   "conn.vncRepeaterID": "ID de repetidor",
   "conn.vncRepeaterIDPlaceholder": "ej. mimaquina",
   "conn.encoding": "Codificación",

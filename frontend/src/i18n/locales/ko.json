@@ -1280,6 +1280,8 @@
   "conn.ftpSkipVerify": "안전하지 않은 TLS 허용(검증 건너뛰기)",
   "conn.ftpSkipVerifyDesc": "FTPS의 인증서 검증을 비활성화합니다. MITM 공격에 취약하므로 신뢰할 수 있는 자체 서명 인증서에 대해서만 활성화하세요.",
   "conn.vncShared": "공유 세션",
+  "conn.vncClipboardEncoding": "클립보드 인코딩",
+  "conn.vncClipboardEncodingDefault": "자동 협상",
   "conn.vncRepeaterID": "리피터 ID",
   "conn.vncRepeaterIDPlaceholder": "예: mymachine",
   "conn.encoding": "인코딩",

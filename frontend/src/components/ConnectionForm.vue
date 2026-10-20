@@ -486,6 +486,20 @@
                   <el-form-item :label="t('conn.vncRepeaterID')">
                     <el-input v-model="form.vncRepeaterID" :placeholder="t('conn.vncRepeaterIDPlaceholder')" />
                   </el-form-item>
+                  <el-form-item :label="t('conn.vncClipboardEncoding')">
+                    <el-select v-model="form.vncClipboardEncoding">
+                      <el-option :label="t('conn.vncClipboardEncodingDefault')" value="auto" />
+                      <el-option label="Unicode (UTF-8)" value="utf-8" />
+                      <el-option label="Simplified Chinese (GBK)" value="gbk" />
+                      <el-option label="Simplified Chinese (GB2312)" value="gb2312" />
+                      <el-option label="Simplified Chinese (GB18030)" value="gb18030" />
+                      <el-option label="Traditional Chinese (Big5)" value="big5" />
+                      <el-option label="Japanese (Shift-JIS)" value="shift-jis" />
+                      <el-option label="Japanese (EUC-JP)" value="euc-jp" />
+                      <el-option label="Korean (EUC-KR)" value="euc-kr" />
+                      <el-option label="Latin-1" value="latin1" />
+                    </el-select>
+                  </el-form-item>
                 </template>
                 <template v-if="form.type === 'telnet'">
                   <el-form-item :label="t('conn.telnetNegotiationMode')">
@@ -1107,6 +1121,7 @@ const form = reactive<ConnectionConfig>({
   ftpSkipVerify: false,
   vncShared: true,
   vncRepeaterID: '',
+  vncClipboardEncoding: 'auto',
   encoding: 'utf-8',
   termType: 'xterm-256color',
   backspaceKey: 'del',
@@ -1516,6 +1531,7 @@ function resetForm() {
   form.ftpSkipVerify = false
   form.vncShared = true
   form.vncRepeaterID = ''
+  form.vncClipboardEncoding = 'auto'
   form.encoding = 'utf-8'
   form.termType = 'xterm-256color'
   form.backspaceKey = 'del'

@@ -199,6 +199,8 @@ type ConnectionConfig struct {
 	// Empty (default) — direct connection to the VNC server.
 	// Non-empty — connect via an UltraVNC-compatible repeater using the given ID.
 	VncRepeaterID string `json:"vncRepeaterID,omitempty"`
+
+	VncClipboardEncoding string `json:"vncClipboardEncoding,omitempty"`
 	// SMB-specific fields
 	SmbDomain string `json:"smbDomain,omitempty"`
 	SmbShare  string `json:"smbShare,omitempty"`

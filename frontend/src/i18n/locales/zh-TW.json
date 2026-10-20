@@ -1273,6 +1273,8 @@
   "conn.ftpSkipVerify": "允許不安全的 TLS（略過驗證）",
   "conn.ftpSkipVerifyDesc": "停用 FTPS 的憑證驗證。容易受到 MITM 攻擊 — 僅在受信任的自簽憑證時啟用。",
   "conn.vncShared": "共用工作階段",
+  "conn.vncClipboardEncoding": "剪貼簿編碼",
+  "conn.vncClipboardEncodingDefault": "自動協商",
   "conn.vncRepeaterID": "轉發器 ID",
   "conn.vncRepeaterIDPlaceholder": "例如 mymachine",
   "conn.encoding": "字元編碼",
