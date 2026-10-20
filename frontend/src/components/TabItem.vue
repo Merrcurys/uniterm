@@ -116,7 +116,7 @@
 
       <!-- ③ 连接功能（ssh / rdp） -->
       <MenuDivider />
-      <MenuItem v-if="tab.type === 'rdp' || tab.type === 'vnc'" @click="enterDesktopFullScreen">{{ t('remoteDesktop.fullscreen') }}</MenuItem>
+      <MenuItem v-if="tab.type === 'rdp' || tab.type === 'vnc' || tab.type === 'spice'" @click="enterDesktopFullScreen">{{ t('remoteDesktop.fullscreen') }}</MenuItem>
       <MenuItem v-if="isSsh" @click="openSftp">{{ t(fileMenuKey) }}</MenuItem>
       <MenuItem v-if="isSsh" @click="uploadFileRz">{{ t('terminal.uploadFileRz') }}</MenuItem>
       <MenuItem v-if="isSsh" @click="openMonitor">{{ t('sidebar.connectMonitor') }}</MenuItem>
@@ -649,7 +649,7 @@ function enterDesktopFullScreen() {
   closeContextMenu()
   tabStore.setActiveTab(props.tab.id)
   nextTick(() => {
-    window.dispatchEvent(new CustomEvent(`${props.tab.type}:fullscreen`, { detail: { panelId: (props.tab as RDPTab | VNCTab).panelId } }))
+    window.dispatchEvent(new CustomEvent(`${props.tab.type}:fullscreen`, { detail: { panelId: (props.tab as RDPTab | VNCTab | SPICETab).panelId } }))
   })
 }
 

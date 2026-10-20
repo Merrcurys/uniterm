@@ -20,6 +20,22 @@ function fixture() {
 }
 
 describe('RDP clipboard synchronization', () => {
+  it('reclaims unchanged local text after another peer takes clipboard ownership', async () => {
+    const f = fixture()
+    await f.sync.requestFormatList()
+    f.bridge.publish.mockClear()
+    const read = deferred<RdpClipboardContent | null>()
+    f.bridge.read.mockReturnValueOnce(read.promise)
+    const stale = f.sync.sync()
+    await Promise.resolve()
+    f.sync.invalidateLocal()
+    read.resolve({ kind: 'text', text: 'stale local copy' })
+    await stale
+    expect(f.bridge.publish).not.toHaveBeenCalled()
+    await f.sync.sync()
+    expect(f.bridge.publish).toHaveBeenCalledWith({ kind: 'text', text: 'local' })
+  })
+
   it('can synchronize VNC text without waiting for an RDP handshake', async () => {
     const bridge = {
       read: vi.fn(async () => ({ kind: 'text' as const, text: 'local VNC text' })),

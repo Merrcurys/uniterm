@@ -231,6 +231,10 @@ func (a *App) SetVNCKeyboardCapture(sessionID, captureID string, enabled bool) (
 	return a.setDesktopKeyboardCapture(sessionID, captureID, enabled, "vnc")
 }
 
+func (a *App) SetSPICEKeyboardCapture(sessionID, captureID string, enabled bool) (bool, error) {
+	return a.setDesktopKeyboardCapture(sessionID, captureID, enabled, "spice")
+}
+
 func (a *App) setDesktopKeyboardCapture(sessionID, captureID string, enabled bool, sessionType string) (bool, error) {
 	a.rdpKeyboardMu.Lock()
 	defer a.rdpKeyboardMu.Unlock()
@@ -265,7 +269,7 @@ func (a *App) setDesktopKeyboardCapture(sessionID, captureID string, enabled boo
 	if hwnd == 0 {
 		hwnd = a.findMainWindow()
 	}
-	if sessionType == "vnc" {
+	if sessionType == "vnc" || sessionType == "spice" {
 		return a.rdpKeyboard.SetShortcutCapture(captureID, hwnd), nil
 	}
 	return a.rdpKeyboard.SetCapture(captureID, hwnd), nil

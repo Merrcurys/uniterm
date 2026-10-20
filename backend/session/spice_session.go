@@ -2,10 +2,13 @@ package session
 
 import (
 	"fmt"
+	"net"
+	"strconv"
 )
 
 type SPICESession struct {
 	baseSession
+	proxy *SPICEProxy
 	wsURL string // direct WebSocket URL passed to frontend spice-client
 }
 
@@ -32,13 +35,24 @@ func (s *SPICESession) Connect(config ConnectionConfig) error {
 	}
 
 	s.title = fmt.Sprintf("%s (SPICE)", config.Host)
-	s.wsURL = fmt.Sprintf("ws://%s:%d/", host, port)
+	proxy := NewSPICEProxy(net.JoinHostPort(host, strconv.Itoa(port)))
+	addr, err := proxy.Start()
+	if err != nil {
+		s.setStatus(StatusError)
+		return fmt.Errorf("spice proxy start: %w", err)
+	}
+	s.proxy = proxy
+	s.wsURL = addr
 
 	s.setStatus(StatusConnected)
 	return nil
 }
 
 func (s *SPICESession) Disconnect() error {
+	if s.proxy != nil {
+		s.proxy.Stop()
+		s.proxy = nil
+	}
 	s.setStatus(StatusDisconnected)
 	return nil
 }

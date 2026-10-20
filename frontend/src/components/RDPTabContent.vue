@@ -63,7 +63,7 @@
       <span class="rdp-status-sep">|</span>
       <span>{{ t('remoteDesktop.resolution') }}: {{ statusResolution }}</span>
       <span class="rdp-status-sep">|</span>
-      <span>{{ t('remoteDesktop.scale') }}<template v-if="displayScale !== null">: {{ displayScale }}%</template></span>
+      <span class="rdp-status-label">{{ t('remoteDesktop.scale') }}<template v-if="displayScale !== null">: {{ displayScale }}%</template></span>
       <el-switch
         v-model="scaleViewport"
         inline-prompt
@@ -1133,22 +1133,27 @@ watch(scaleViewport, () => nextTick(() => {
 .rdp-error-text { color: var(--error); }
 .rdp-error-detail { color: var(--text-muted); font-size: 0.8125rem; max-width: 30rem; text-align: center; word-break: break-word; }
 .rdp-statusbar {
+  height: 1.5rem;
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.25rem 0.75rem;
+  padding: 0 0.75rem;
   background: var(--bg-elevated);
   color: var(--text-muted);
   font-size: 0.75rem;
   flex-shrink: 0;
+  box-sizing: border-box;
+  z-index: 5;
 }
 .rdp-statusbar-hidden { visibility: hidden; pointer-events: none; }
 .rdp-status-dot {
   width: 0.5rem; height: 0.5rem;
   border-radius: 50%;
   background: var(--success);
+  flex-shrink: 0;
 }
 .rdp-status-sep { color: var(--text-disabled); }
+.rdp-status-label { font-size: 0.6875rem; }
 .rdp-status-spacer { flex: 1; }
 .rdp-fullscreen-btn {
   border: 1px solid var(--border-default);

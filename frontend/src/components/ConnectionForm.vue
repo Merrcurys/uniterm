@@ -1043,7 +1043,7 @@ const isSqliteDb = computed(() =>
   form.type === 'database' && form.dbType === 'sqlite'
 )
 
-const TUNNEL_UNSUPPORTED = ['spice', 'mosh', 'local', 'wsl', 'serial', 'container']
+const TUNNEL_UNSUPPORTED = ['mosh', 'local', 'wsl', 'serial', 'container']
 // SQLite is an embedded file database — an SSH tunnel forwards TCP streams,
 // which cannot reach it.
 const showTunnel = computed(() =>

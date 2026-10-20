@@ -1,7 +1,11 @@
 package session
 
 import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"sync"
@@ -15,24 +19,39 @@ import (
 // One instance per SPICE session, bound to a random local port.
 type SPICEProxy struct {
 	listener net.Listener
+	server   *http.Server
 	target   string
-	stopCh   chan struct{}
-	stopOnce sync.Once
 	wg       sync.WaitGroup
 	mu       sync.Mutex
-	wsConn   *websocket.Conn
-	tcpConn  net.Conn
+	conns    map[*websocket.Conn]net.Conn
+	ctx      context.Context
+	cancel   context.CancelFunc
 }
 
 func NewSPICEProxy(target string) *SPICEProxy {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &SPICEProxy{
 		target: target,
-		stopCh: make(chan struct{}),
+		conns:  make(map[*websocket.Conn]net.Conn),
+		ctx:    ctx,
+		cancel: cancel,
 	}
 }
 
 // Start begins listening on a random local port and returns the WebSocket URL.
 func (p *SPICEProxy) Start() (string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.ctx.Err() != nil {
+		return "", fmt.Errorf("spice proxy stopped")
+	}
+	if p.listener != nil {
+		return "", fmt.Errorf("spice proxy already started")
+	}
+	var token [16]byte
+	if _, err := rand.Read(token[:]); err != nil {
+		return "", fmt.Errorf("spice proxy token: %w", err)
+	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return "", fmt.Errorf("spice proxy listen: %w", err)
@@ -45,7 +64,8 @@ func (p *SPICEProxy) Start() (string, error) {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	path := "/" + hex.EncodeToString(token[:])
+	mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 		ws, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			log.Writef("[SPICEProxy] WebSocket upgrade failed: %v", err)
@@ -53,99 +73,90 @@ func (p *SPICEProxy) Start() (string, error) {
 		}
 		p.handleWebSocket(ws)
 	})
+	p.server = &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 
 	p.wg.Add(1)
 	go func() {
 		defer p.wg.Done()
-		_ = http.Serve(ln, mux)
+		_ = p.server.Serve(ln)
 	}()
 
 	addr := ln.Addr().(*net.TCPAddr)
 	log.Writef("[SPICEProxy] Listening on ws://127.0.0.1:%d, target: %s", addr.Port, p.target)
-	return fmt.Sprintf("ws://127.0.0.1:%d", addr.Port), nil
+	return fmt.Sprintf("ws://127.0.0.1:%d%s", addr.Port, path), nil
 }
 
 func (p *SPICEProxy) handleWebSocket(ws *websocket.Conn) {
+	defer ws.Close()
 	p.mu.Lock()
-	if p.wsConn != nil {
+	if p.ctx.Err() != nil {
 		p.mu.Unlock()
-		log.Writef("[SPICEProxy] Rejecting additional WebSocket connection")
-		ws.Close()
 		return
 	}
-	p.wsConn = ws
+	p.conns[ws] = nil
+	p.wg.Add(1)
 	p.mu.Unlock()
-	log.Writef("[SPICEProxy] WebSocket client connected")
+	defer p.wg.Done()
 
 	// Allow large SPICE frames (up to 16 MB).
 	ws.SetReadLimit(16 << 20)
 
 	defer func() {
 		p.mu.Lock()
-		if p.wsConn == ws {
-			p.wsConn = nil
-		}
+		delete(p.conns, ws)
 		p.mu.Unlock()
 	}()
 
-	tcp, err := net.DialTimeout("tcp", p.target, 5*time.Second)
+	dialer := net.Dialer{Timeout: 5 * time.Second}
+	tcp, err := dialer.DialContext(p.ctx, "tcp", p.target)
 	if err != nil {
 		log.Writef("[SPICEProxy] TCP dial to %s failed: %v", p.target, err)
-		ws.Close()
 		return
 	}
-	log.Writef("[SPICEProxy] TCP connection to %s established", p.target)
 
 	p.mu.Lock()
-	p.tcpConn = tcp
+	if p.ctx.Err() != nil {
+		p.mu.Unlock()
+		tcp.Close()
+		return
+	}
+	p.conns[ws] = tcp
 	p.mu.Unlock()
 
-	p.wg.Add(2)
-
+	readDone := make(chan struct{})
 	go func() {
-		defer p.wg.Done()
+		defer close(readDone)
 		defer tcp.Close()
+		defer ws.Close()
 		for {
-			select {
-			case <-p.stopCh:
-				return
-			default:
-			}
-			msgType, data, err := ws.ReadMessage()
+			msgType, reader, err := ws.NextReader()
 			if err != nil {
-				log.Writef("[SPICEProxy] WebSocket read error: %v", err)
 				return
 			}
 			if msgType == websocket.BinaryMessage {
-				if _, err := tcp.Write(data); err != nil {
-					log.Writef("[SPICEProxy] TCP write error: %v", err)
+				if _, err := io.Copy(tcp, reader); err != nil {
 					return
 				}
 			}
 		}
 	}()
-
-	go func() {
-		defer p.wg.Done()
-		defer ws.Close()
-		buf := make([]byte, 32768)
-		for {
-			select {
-			case <-p.stopCh:
-				return
-			default:
-			}
-			n, err := tcp.Read(buf)
-			if err != nil {
-				log.Writef("[SPICEProxy] TCP read error: %v", err)
-				return
-			}
+	defer func() {
+		tcp.Close()
+		ws.Close()
+		<-readDone
+	}()
+	buf := make([]byte, 32768)
+	for {
+		n, err := tcp.Read(buf)
+		if n > 0 {
 			if err := ws.WriteMessage(websocket.BinaryMessage, buf[:n]); err != nil {
-				log.Writef("[SPICEProxy] WebSocket write error: %v", err)
 				return
 			}
 		}
-	}()
+		if err != nil {
+			return
+		}
+	}
 }
 
 // Stop closes all connections and waits for goroutines to exit.
@@ -153,17 +164,21 @@ func (p *SPICEProxy) handleWebSocket(ws *websocket.Conn) {
 // window to accept and spawn goroutines that never reach Done
 // (SESSION-04).
 func (p *SPICEProxy) Stop() {
-	p.stopOnce.Do(func() { close(p.stopCh) })
+	p.cancel()
 	p.mu.Lock()
-	if p.wsConn != nil {
-		p.wsConn.Close()
+	for ws, tcp := range p.conns {
+		ws.Close()
+		if tcp != nil {
+			tcp.Close()
+		}
 	}
-	if p.tcpConn != nil {
-		p.tcpConn.Close()
-	}
-	p.mu.Unlock()
 	if p.listener != nil {
 		p.listener.Close()
+	}
+	server := p.server
+	p.mu.Unlock()
+	if server != nil {
+		server.Close()
 	}
 	p.wg.Wait()
 }

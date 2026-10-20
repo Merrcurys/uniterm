@@ -42,6 +42,11 @@ export class RdpClipboardSync {
     return this.sync(true)
   }
 
+  invalidateLocal(): void {
+    ++this.revision
+    this.lastKey = undefined
+  }
+
   sync(force = false, text?: string): Promise<void> {
     const revision = this.revision
     return this.enqueue(async () => {
