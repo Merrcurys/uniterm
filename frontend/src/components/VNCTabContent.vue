@@ -1,5 +1,14 @@
 <template>
-  <div class="vnc-tab-content">
+  <div
+    ref="container"
+    class="vnc-tab-content"
+    :class="{ 'is-fullscreen': isFullscreen }"
+    :data-remote-keyboard="keyboardFocused && !viewOnly ? 'true' : undefined"
+    @focusin="onFocusIn"
+    @focusout="onFocusOut"
+    @keydown.capture="onLocalKey"
+    @keyup.capture="onLocalKey"
+  >
     <!-- Connecting state -->
     <div v-if="status === 'connecting'" class="vnc-overlay">
       <el-icon class="is-loading" :size="'2rem'"><Loader /></el-icon>
@@ -24,12 +33,13 @@
       v-show="status === 'connected'"
       ref="vncContainer"
       class="vnc-area"
+      :class="{ 'is-unscaled': !scaleViewport }"
       tabindex="0"
       @paste="onPaste"
     />
 
     <!-- Status bar -->
-    <div v-show="status === 'connected'" class="vnc-statusbar">
+    <div v-show="status === 'connected' && !isFullscreen" class="vnc-statusbar">
       <span class="vnc-status-dot" />
       <span>{{ t('vnc.connected') }}</span>
       <span class="vnc-status-sep">|</span>
@@ -61,19 +71,40 @@
         :inactive-text="t('vnc.scaleOff')"
         style="--el-switch-on-color: var(--success); --el-switch-off-color: var(--text-disabled)"
       />
+      <span class="vnc-status-spacer" />
+      <button class="vnc-fullscreen-btn" @click="toggleFullscreen">{{ t('remoteDesktop.fullscreen') }}</button>
     </div>
+    <RemoteDesktopToolbar
+      v-if="isFullscreen"
+      v-model:scale-viewport="scaleViewport"
+      :host="config?.host || ''"
+      :port="config?.port || 5900"
+      :disabled="status !== 'connected'"
+      @restore="toggleFullscreen"
+      @focus-desktop="focusDesktop"
+      @minimize="blurDesktop"
+      @error="onToolbarError"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount, onActivated, onDeactivated, nextTick } from 'vue'
 import { Loader } from '@lucide/vue'
+import RemoteDesktopToolbar from './RemoteDesktopToolbar.vue'
 import { useI18n } from '../i18n'
 import { usePanelStore } from '../stores/panelStore'
 import { useSessionStore } from '../stores/sessionStore'
 import type { ConnectionConfig } from '../types/session'
-import { Clipboard, Events } from '@wailsio/runtime'
-import { CreateSession, CloseSession } from '../../bindings/github.com/ys-ll/uniterm/app'
+import { Events } from '@wailsio/runtime'
+import { CreateSession, CloseSession, SetVNCKeyboardCapture, EncodeVNCClipboardText } from '../../bindings/github.com/ys-ll/uniterm/app'
+import { createVncClipboard } from '../utils/vncClipboard'
+import { installVncPixelScaling } from '../utils/vncScaling'
+import { VncNativeKeyboard } from '../utils/vncKeyboard'
+import { queueRemoteKeyboardChange } from '../utils/remoteKeyboard'
+import type { NativeRdpKey } from '../utils/remoteKeyboard'
+import { RdpClipboardSync, RdpInputQueue } from '../utils/rdpClipboard'
+import { readClipboardText, writeClipboard } from '../composables/useClipboardWrite'
 const { t } = useI18n()
 const panelStore = usePanelStore()
 const sessionStore = useSessionStore()
@@ -87,11 +118,24 @@ const props = defineProps<{
 const status = ref<'connecting' | 'connected' | 'disconnected' | 'error'>('disconnected')
 const lastError = ref<string>('')
 const currentSessionId = ref<string | null>(props.sessionId)
+const container = ref<HTMLDivElement | null>(null)
+const isFullscreen = ref(false)
 const vncContainer = ref<HTMLDivElement | null>(null)
 const savedPassword = ref<string>('')
-const scaleViewport = ref(true)
+const scaleViewport = ref(false)
 const viewOnly = ref(false)
 const showDotCursor = ref(false)
+const keyboardFocused = ref(false)
+let keyboardCaptureId = ''
+let keyboardHeartbeat: ReturnType<typeof setInterval> | null = null
+let clipboardPoll: ReturnType<typeof setInterval> | null = null
+let clipboardSync: RdpClipboardSync | null = null
+let nativeKeyboard: VncNativeKeyboard | null = null
+let restoreDesktopInput: (() => void) | null = null
+let unsubKeyboard: (() => void) | null = null
+const inputKeys = new Set<string>()
+const sentKeys = new Map<string, number>()
+const inputQueue = new RdpInputQueue(error => console.error('VNC input/clipboard error:', error))
 
 function readThemeBackground(): string {
   // Pull the resolved --bg-base CSS variable, which the global theme
@@ -119,6 +163,15 @@ function watchThemeBackground() {
 let rfb: any = null
 let unsubStatus: (() => void) | null = null
 let isIniting = false
+let restorePixelScaling: (() => void) | null = null
+let pixelRatioQuery: MediaQueryList | null = null
+
+function onPixelRatioChange() {
+  pixelRatioQuery?.removeEventListener('change', onPixelRatioChange)
+  pixelRatioQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`)
+  pixelRatioQuery.addEventListener('change', onPixelRatioChange)
+  rfb?._updateScale()
+}
 
 async function connect() {
   if (!props.config) return
@@ -149,6 +202,11 @@ async function connect() {
 }
 
 async function reconnect() {
+  onFocusOut()
+  restoreDesktopInput?.()
+  restoreDesktopInput = null
+  restorePixelScaling?.()
+  restorePixelScaling = null
   if (currentSessionId.value) {
     try { await CloseSession(currentSessionId.value) } catch (_) {}
     currentSessionId.value = null
@@ -163,6 +221,11 @@ async function reconnect() {
 function initRFB(proxyAddr: string, password: string) {
   if (isIniting) return
   isIniting = true
+  onFocusOut()
+  restoreDesktopInput?.()
+  restoreDesktopInput = null
+  restorePixelScaling?.()
+  restorePixelScaling = null
 
   if (rfb) {
     try { rfb.disconnect() } catch (_) {}
@@ -192,10 +255,143 @@ function initRFB(proxyAddr: string, password: string) {
 
 function applyRFBOptions() {
   if (!rfb) return
+  restorePixelScaling?.()
+  restorePixelScaling = installVncPixelScaling(rfb)
   rfb.viewOnly = viewOnly.value
   rfb.scaleViewport = scaleViewport.value
   rfb.showDotCursor = showDotCursor.value
   rfb.background = readThemeBackground()
+  setupDesktopInput()
+}
+
+function ownsRemoteKeyboard(): boolean {
+  return status.value === 'connected' && !viewOnly.value && document.hasFocus() &&
+    document.activeElement === vncContainer.value?.querySelector('canvas')
+}
+
+function onLocalKey(event: KeyboardEvent) {
+  if (event.code === 'F12') event.stopPropagation()
+}
+
+function syncLocalClipboard(text?: string): Promise<void> {
+  return ownsRemoteKeyboard() ? clipboardSync?.sync(false, text) ?? Promise.resolve() : Promise.resolve()
+}
+
+function queueVncKey(keysym: number, code: string, down: boolean, send: () => void) {
+  const repeat = inputKeys.has(code)
+  const paste = down && !repeat && ((code === 'KeyV' &&
+    ['ControlLeft', 'ControlRight', 'MetaLeft', 'MetaRight'].some(key => inputKeys.has(key))) ||
+    (code === 'Insert' && ['ShiftLeft', 'ShiftRight'].some(key => inputKeys.has(key))))
+  if (down) inputKeys.add(code)
+  else inputKeys.delete(code)
+  if (paste) inputQueue.enqueue(() => syncLocalClipboard())
+  inputQueue.enqueue(() => {
+    send()
+    if (down) sentKeys.set(code, keysym)
+    else sentKeys.delete(code)
+  })
+}
+
+function setupDesktopInput() {
+  restoreDesktopInput?.()
+  const target = rfb
+  const clipboard = createVncClipboard(target, props.config?.vncClipboardEncoding, EncodeVNCClipboardText,
+    () => ownsRemoteKeyboard() && rfb === target)
+  const sync = new RdpClipboardSync({
+    read: async () => {
+      const text = await readClipboardText()
+      return ownsRemoteKeyboard() ? { kind: 'text', text } : null
+    },
+    publish: async content => {
+      if (content.kind === 'text') await clipboard.publish(content.text)
+    },
+    writeText: writeClipboard,
+  }, true)
+  clipboardSync = sync
+  nativeKeyboard = new VncNativeKeyboard((keysym, code, down) => {
+    queueVncKey(keysym, code, down, () => target.sendKey(keysym, code, down))
+  })
+  const keyboard = target._keyboard
+  const original = keyboard.onkeyevent
+  const handler = (keysym: number, code: string, down: boolean, numlock: boolean, capslock: boolean) => {
+    queueVncKey(keysym, code, down, () => original(keysym, code, down, numlock, capslock))
+  }
+  keyboard.onkeyevent = handler
+  const onClipboard = (event: any) => {
+    try {
+      sync.receiveText(clipboard.decode(event.detail.text)).catch(error => console.error('VNC clipboard write error:', error))
+    } catch (error) {
+      console.error('VNC clipboard decode error:', error)
+    }
+  }
+  target.addEventListener('clipboard', onClipboard)
+  restoreDesktopInput = () => {
+    sync.dispose()
+    clipboard.dispose()
+    target.removeEventListener('clipboard', onClipboard)
+    if (keyboard.onkeyevent === handler) keyboard.onkeyevent = original
+    inputQueue.clear()
+    nativeKeyboard = null
+    clipboardSync = null
+    inputKeys.clear()
+    sentKeys.clear()
+  }
+}
+
+function onFocusIn() {
+  if (!ownsRemoteKeyboard()) return
+  keyboardFocused.value = true
+  syncLocalClipboard().catch(error => console.error('VNC clipboard sync error:', error))
+  if (keyboardCaptureId || !currentSessionId.value) return
+  const captureID = crypto.randomUUID()
+  const sessionID = currentSessionId.value
+  keyboardCaptureId = captureID
+  queueRemoteKeyboardChange(() => SetVNCKeyboardCapture(sessionID, captureID, true))
+    .then(enabled => {
+      if (!enabled || keyboardCaptureId !== captureID) return
+      let pending = false
+      keyboardHeartbeat = setInterval(() => {
+        if (!ownsRemoteKeyboard()) { onFocusOut(); return }
+        if (pending) return
+        pending = true
+        queueRemoteKeyboardChange(() => SetVNCKeyboardCapture(sessionID, captureID, true))
+          .catch(error => {
+            console.error('VNC keyboard capture error:', error)
+            if (keyboardCaptureId === captureID) onFocusOut()
+          })
+          .finally(() => { pending = false })
+      }, 1000)
+    })
+    .catch(error => console.error('VNC keyboard capture error:', error))
+}
+
+function onFocusOut() {
+  if (keyboardHeartbeat !== null) clearInterval(keyboardHeartbeat)
+  keyboardHeartbeat = null
+  keyboardFocused.value = false
+  const captureID = keyboardCaptureId
+  keyboardCaptureId = ''
+  if (captureID) {
+    const sessionID = currentSessionId.value || ''
+    queueRemoteKeyboardChange(() => SetVNCKeyboardCapture(sessionID, captureID, false))
+      .catch(error => console.error('VNC keyboard release error:', error))
+  }
+  inputQueue.clear()
+  nativeKeyboard?.release()
+  for (const [code, keysym] of Array.from(sentKeys).reverse()) rfb?.sendKey(keysym, code, false)
+  sentKeys.clear()
+  inputKeys.clear()
+}
+
+function onNativeKey(data: NativeRdpKey) {
+  if (data.captureID !== keyboardCaptureId || !ownsRemoteKeyboard()) return
+  if (data.reset) { onFocusOut(); onFocusIn(); return }
+  nativeKeyboard?.key(data)
+}
+
+function onVisibilityChange() {
+  if (document.hidden) onFocusOut()
+  else onFocusIn()
 }
 
 function createRFB(RFB: any, proxyAddr: string, password: string) {
@@ -258,19 +454,21 @@ function createRFB(RFB: any, proxyAddr: string, password: string) {
     }
   })
 
-  rfb.addEventListener('clipboard', (e: any) => {
-    const text = e.detail.text
-    Clipboard.SetText(text).catch(() => {})
-  })
-
   isIniting = false
 }
 
 function onPaste(e: ClipboardEvent) {
   const text = e.clipboardData?.getData('text')
-  if (text && rfb) {
-    rfb.clipboardPasteFrom(text)
-  }
+  if (!text || !rfb || !ownsRemoteKeyboard()) return
+  e.preventDefault()
+  const target = rfb
+  inputQueue.enqueue(() => syncLocalClipboard(text))
+  inputQueue.enqueue(() => {
+    target.sendKey(0xffe3, 'ControlLeft', true)
+    target.sendKey(0x76, 'KeyV', true)
+    target.sendKey(0x76, 'KeyV', false)
+    target.sendKey(0xffe3, 'ControlLeft', false)
+  })
 }
 
 function onReconnectEvent(e: Event) {
@@ -278,7 +476,50 @@ function onReconnectEvent(e: Event) {
   if (panelId && panelId === props.panelId) reconnect()
 }
 
+function focusDesktop() {
+  if (status.value === 'connected') rfb?.focus({ preventScroll: true })
+}
+
+function blurDesktop() {
+  onFocusOut()
+  rfb?.blur()
+}
+
+function onToolbarError(error: unknown) {
+  console.error('VNC minimize error:', error)
+}
+
+function onFullscreenChange() {
+  isFullscreen.value = document.fullscreenElement === container.value
+}
+
+async function toggleFullscreen() {
+  const el = container.value
+  if (!el) return
+  try {
+    if (document.fullscreenElement === el) await document.exitFullscreen()
+    else await el.requestFullscreen()
+    focusDesktop()
+  } catch (error) {
+    console.error('VNC fullscreen error:', error)
+  }
+}
+
+function onFullscreenEvent(event: Event) {
+  if ((event as CustomEvent<{ panelId: string }>).detail?.panelId === props.panelId) void toggleFullscreen()
+}
+
 onMounted(() => {
+  unsubKeyboard = Events.On('remote-desktop:keyboard', event => onNativeKey(event.data as NativeRdpKey))
+  window.addEventListener('blur', onFocusOut)
+  window.addEventListener('focus', onFocusIn)
+  document.addEventListener('visibilitychange', onVisibilityChange)
+  clipboardPoll = setInterval(() => {
+    syncLocalClipboard().catch(error => console.error('VNC clipboard sync error:', error))
+  }, 1000)
+  onPixelRatioChange()
+  document.addEventListener('fullscreenchange', onFullscreenChange)
+  window.addEventListener('vnc:fullscreen', onFullscreenEvent)
   if (props.sessionId) {
     currentSessionId.value = props.sessionId
   }
@@ -342,6 +583,21 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  onFocusOut()
+  restoreDesktopInput?.()
+  restoreDesktopInput = null
+  unsubKeyboard?.()
+  if (clipboardPoll !== null) clearInterval(clipboardPoll)
+  clipboardPoll = null
+  window.removeEventListener('blur', onFocusOut)
+  window.removeEventListener('focus', onFocusIn)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
+  pixelRatioQuery?.removeEventListener('change', onPixelRatioChange)
+  pixelRatioQuery = null
+  restorePixelScaling?.()
+  restorePixelScaling = null
+  document.removeEventListener('fullscreenchange', onFullscreenChange)
+  window.removeEventListener('vnc:fullscreen', onFullscreenEvent)
   themeObserver?.disconnect()
   themeObserver = null
   unsubStatus?.()
@@ -370,11 +626,16 @@ watch(scaleViewport, (val) => {
   if (rfb) rfb.scaleViewport = val
 })
 watch(viewOnly, (val) => {
+  if (val) onFocusOut()
   if (rfb) rfb.viewOnly = val
+  if (!val) onFocusIn()
 })
 watch(showDotCursor, (val) => {
   if (rfb) rfb.showDotCursor = val
 })
+watch(status, value => value === 'connected' ? nextTick(onFocusIn) : onFocusOut())
+onDeactivated(onFocusOut)
+onActivated(onFocusIn)
 </script>
 
 <style scoped>
@@ -397,6 +658,13 @@ watch(showDotCursor, (val) => {
 .vnc-area :deep(canvas) {
   display: block;
   flex-shrink: 0;
+}
+.vnc-area.is-unscaled :deep(canvas) {
+  image-rendering: pixelated;
+}
+.vnc-tab-content.is-fullscreen .vnc-area,
+.vnc-tab-content.is-fullscreen .vnc-overlay {
+  bottom: 0;
 }
 .vnc-overlay {
   position: absolute;
@@ -442,4 +710,17 @@ watch(showDotCursor, (val) => {
 }
 .vnc-status-sep { color: var(--text-disabled); }
 .vnc-status-label { font-size: 0.6875rem; }
+.vnc-status-spacer { flex: 1; }
+.vnc-fullscreen-btn {
+  border: 1px solid var(--border-default);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  padding: 1px 0.625rem;
+  border-radius: var(--radius-sm);
+}
+.vnc-fullscreen-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
 </style>

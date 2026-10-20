@@ -67,6 +67,8 @@ type App struct {
 	tunnelStarts         map[string]*tunnelStartRequest
 	tunnelsClosed        bool
 	mainHwnd             uintptr
+	rdpKeyboardMu        stdsync.Mutex
+	rdpKeyboard          *platform.RDPKeyboardCapture
 	originalWndProc      uintptr
 	wndProcCb            uintptr // keep alive to prevent GC
 	inSizeMove           bool
@@ -247,20 +249,19 @@ func (a *App) ServiceStartup(ctx context.Context, options application.ServiceOpt
 	go func() {
 		for evt := range a.moveResizeCh {
 			a.emit(evt)
-			if evt == "rdp:move-resize-end" {
+			if evt == "window:resize-end" {
 				// Notify the frontend that the native window stopped resizing
 				// (drag-to-restore / maximize / programmatic resize). The terminal
 				// re-fits on this signal because the browser does not always fire a
 				// final window.resize at the settled size after a native drag, which
 				// otherwise leaves the canvas at a stale small row count (issue #656).
 				// Platform-neutral name; on non-Windows it simply never fires.
-				a.emit("window:resize-end")
 				a.saveWindowStateFromRuntime()
 			}
 		}
 	}()
 
-	// Discover main window HWND for RDP child window embedding
+	// Discover the main HWND for native keyboard capture and window state tracking
 	a.mainHwnd = a.findMainWindow()
 	a.subclassMainWindow()
 
@@ -807,6 +808,7 @@ func (a *App) watchForeground(ctx context.Context) {
 }
 
 func (a *App) shutdown() {
+	a.closeRDPKeyboard()
 	a.unsubclassMainWindow()
 	if a.mcpServer != nil {
 		a.mcpServer.Stop()

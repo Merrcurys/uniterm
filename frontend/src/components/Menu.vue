@@ -17,6 +17,7 @@
 </template>
 
 <script setup lang="ts">
+import { releaseRemoteKeyboardFocus } from '../utils/remoteKeyboard'
 import { ref, reactive, provide, watch, nextTick } from 'vue'
 
 // Single unified menu. Covers every showed-panel style of menu the app uses:
@@ -35,21 +36,14 @@ interface ActiveMenu { el: () => HTMLElement | null; close: () => void }
 let active: ActiveMenu | null = null
 let docBound = false
 
-// ── RDP overlay coordination ──
-// The RDP ActiveX native window sits above the webview layer and occludes
-// HTML-rendered menus. Every Menu instance hides the RDP window when it opens
-// and restores it when it closes. A reference counter handles overlapping
-// transitions (one menu closing as another opens): the push fires on the first
-// open, the pop only on the last close.
-let menuOpenCount = 0
-
 // Close the active menu whenever any surface broadcasts the legacy
-// global:close-context-menus event (opening a dialog, RDP overlay push,
+// global:close-context-menus event (opening a dialog,
 // keyboard nav, etc.). Centralized here so no host re-subscribes to force-close
 // menus — single-open + this event is the whole close story.
 window.addEventListener('global:close-context-menus', () => { active?.close() })
 
 function activate(m: ActiveMenu) {
+  releaseRemoteKeyboardFocus()
   // Right-click menus close each other because main.ts dispatches the global
   // close signal on every `contextmenu` (capture) before the new menu opens.
   // Broadcast the same signal here when taking over a *different* menu so a
@@ -57,13 +51,8 @@ function activate(m: ActiveMenu) {
   // that's actually proven to fire. Dispatch BEFORE switching `active` so the
   // signal closes the previous menu, not this one.
   //
-  // Re-activating the SAME menu (open()/openAt() emit `update:visible` true and
-  // the visible-prop watcher ALSO calls activate) must NOT push/ref-count again,
-  // otherwise menuOpenCount never returns to 0 and the pop that restores the RDP
-  // window never fires — the RDP stays on top and occludes every later menu.
   if (active === m) {
-    // Already the active menu: ensure the shared dismiss listeners are bound,
-    // then bail — this is the watcher's duplicate call.
+    // The visible-prop watcher can activate an already opened menu.
     if (!docBound) {
       document.addEventListener('click', onDocClick)
       document.addEventListener('keydown', onDocKeydown)
@@ -79,19 +68,9 @@ function activate(m: ActiveMenu) {
     document.addEventListener('keydown', onDocKeydown)
     docBound = true
   }
-  // Hide the native RDP window so menus aren't occluded (first open only).
-  if (menuOpenCount === 0) {
-    window.dispatchEvent(new CustomEvent('rdp:overlay-push'))
-  }
-  menuOpenCount++
 }
 function deactivate(m: ActiveMenu) {
   if (active === m) active = null
-  menuOpenCount = Math.max(0, menuOpenCount - 1)
-  // Restore the RDP window only after the last menu closes.
-  if (menuOpenCount === 0) {
-    window.dispatchEvent(new CustomEvent('rdp:overlay-pop'))
-  }
 }
 
 // Bubble-phase outside-click close. Trigger buttons use @click.stop so their own

@@ -116,7 +116,7 @@
 
       <!-- ③ 连接功能（ssh / rdp） -->
       <MenuDivider />
-      <MenuItem v-if="tab.type === 'rdp'" @click="enterRdpFullScreen">{{ t('rdp.fullscreen') }}</MenuItem>
+      <MenuItem v-if="tab.type === 'rdp' || tab.type === 'vnc' || tab.type === 'spice'" @click="enterDesktopFullScreen">{{ t('remoteDesktop.fullscreen') }}</MenuItem>
       <MenuItem v-if="isSsh" @click="openSftp">{{ t(fileMenuKey) }}</MenuItem>
       <MenuItem v-if="isSsh" @click="uploadFileRz">{{ t('terminal.uploadFileRz') }}</MenuItem>
       <MenuItem v-if="isSsh" @click="openMonitor">{{ t('sidebar.connectMonitor') }}</MenuItem>
@@ -150,7 +150,6 @@ import {
   DisableSessionOutputLog,
   GetSessionOutputLogInfo,
   OpenPathInExplorer,
-  RDPSetFullScreen,
 } from '../../bindings/github.com/ys-ll/uniterm/app'
 import { msg } from '../services/message'
 import { ElMessageBox } from 'element-plus'
@@ -481,9 +480,6 @@ function closeContextMenu() {
   ctxMenuVisible.value = false
 }
 
-watch(ctxMenuVisible, (val) => {
-  window.dispatchEvent(new CustomEvent(val ? 'rdp:overlay-push' : 'rdp:overlay-pop'))
-})
 
 function startEdit() {
   closeContextMenu()
@@ -649,13 +645,12 @@ function locateHost() {
   closeContextMenu()
 }
 
-async function enterRdpFullScreen() {
+function enterDesktopFullScreen() {
   closeContextMenu()
-  const panel = panelStore.getPanel((props.tab as RDPTab).panelId)
-  const sid = panel?.sessionId
-  if (!sid) return
-  window.dispatchEvent(new CustomEvent('rdp:fullscreen-enter'))
-  try { await RDPSetFullScreen(sid, true) } catch (e) { console.error('RDP fullscreen error:', e) }
+  tabStore.setActiveTab(props.tab.id)
+  nextTick(() => {
+    window.dispatchEvent(new CustomEvent(`${props.tab.type}:fullscreen`, { detail: { panelId: (props.tab as RDPTab | VNCTab | SPICETab).panelId } }))
+  })
 }
 
 async function toggleOutputLog() {
