@@ -110,6 +110,10 @@ export const usePanelStore = defineStore('panel', () => {
     if (!p) return
     const prev = p.sessionId
     p.sessionId = sessionId
+    // shallowReactive does not track deep property mutations on Map values,
+    // so re-set the entry to trigger reactive updates (issue: database tree
+    // not loading on first connect because props.sessionId never updated).
+    panelState.panels.set(panelId, p)
     // Tell the backend which panel this session belongs to so per-panel
     // output logging survives reconnects. The previous session's binding
     // is dropped best-effort — if it's already gone the backend no-ops.
@@ -123,23 +127,33 @@ export const usePanelStore = defineStore('panel', () => {
 
   function updateStatus(panelId: string, status: PanelStatus) {
     const p = panelState.panels.get(panelId)
-    if (p) p.status = status
+    if (p) {
+      p.status = status
+      panelState.panels.set(panelId, p)
+    }
   }
 
   function updateTitle(panelId: string, title: string) {
     const p = panelState.panels.get(panelId)
     if (!p) return
     p.title = makeTitleUnique(title, panelId)
+    panelState.panels.set(panelId, p)
   }
 
   function setOutputLog(panelId: string, state: { enabled: boolean; path: string }) {
     const p = panelState.panels.get(panelId)
-    if (p) p.outputLog = state
+    if (p) {
+      p.outputLog = state
+      panelState.panels.set(panelId, p)
+    }
   }
 
   function movePanelToTab(panelId: string, tabId: string) {
     const p = panelState.panels.get(panelId)
-    if (p) p.tabId = tabId
+    if (p) {
+      p.tabId = tabId
+      panelState.panels.set(panelId, p)
+    }
   }
 
   function getTransferTasks(panelId: string): TransferTaskUI[] {
