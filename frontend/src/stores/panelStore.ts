@@ -122,7 +122,7 @@ export const usePanelStore = defineStore('panel', () => {
     // is invisible to Vue's reactivity system.
     panelState.panels.delete(panelId)
     panelState.panels.set(panelId, p)
-    console.log('[panelStore] bindSession:', { panelId, prev, sessionId })
+
     // Tell the backend which panel this session belongs to so per-panel
     // output logging survives reconnects. The previous session's binding
     // is dropped best-effort — if it's already gone the backend no-ops.
