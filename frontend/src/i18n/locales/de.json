@@ -1341,6 +1341,8 @@
   "shortcut.toggleTimestamps": "Zeitstempel umschalten",
   "shortcut.zoomFontIn": "Terminalschrift vergrößern",
   "shortcut.zoomFontOut": "Terminalschrift verkleinern",
+  "shortcut.toggleFilePanel": "Dateipanel ein/aus",
+  "shortcut.toggleMonitor": "Monitor ein/aus",
   "shortcut.title": "Tastenkombinationen",
   "shortcut.catTabs": "Tabs & Panels",
   "shortcut.catSidebar": "Seitenleiste & Ansichten",

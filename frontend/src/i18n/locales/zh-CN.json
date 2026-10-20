@@ -1342,6 +1342,8 @@
   "shortcut.toggleTimestamps": "切换时间显示",
   "shortcut.zoomFontIn": "放大终端字体",
   "shortcut.zoomFontOut": "缩小终端字体",
+  "shortcut.toggleFilePanel": "切换文件边栏",
+  "shortcut.toggleMonitor": "切换监控边栏",
   "shortcut.title": "快捷键",
   "shortcut.catTabs": "标签页与面板",
   "shortcut.catSidebar": "边栏与视图",

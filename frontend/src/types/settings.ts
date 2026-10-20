@@ -160,6 +160,8 @@ export type ShortcutAction =
   | 'toggleTimestamps'
   | 'zoomFontIn'
   | 'zoomFontOut'
+  | 'toggleFilePanel'    // 切换文件边栏
+  | 'toggleMonitor'      // 切换资源监控边栏
 
 // User-facing bindings only use ctrl/shift/alt. On macOS the runtime mirrors
 // every ctrl combo to Cmd (per-action shortcuts register both; the digit
@@ -211,6 +213,8 @@ export const SHORTCUT_LABELS: Record<ShortcutAction, string> = {
   toggleTimestamps: 'shortcut.toggleTimestamps',
   zoomFontIn: 'shortcut.zoomFontIn',
   zoomFontOut: 'shortcut.zoomFontOut',
+  toggleFilePanel: 'shortcut.toggleFilePanel',
+  toggleMonitor: 'shortcut.toggleMonitor',
 }
 
 export const DEFAULT_KEYBOARD: KeyboardSettings = {
@@ -235,6 +239,8 @@ export const DEFAULT_KEYBOARD: KeyboardSettings = {
   toggleTimestamps: { ctrl: true, shift: true, alt: false, key: 't' },
   zoomFontIn: { ctrl: true, shift: false, alt: false, key: '=' },
   zoomFontOut: { ctrl: true, shift: false, alt: false, key: '-' },
+  toggleFilePanel: { ctrl: true, shift: true, alt: false, key: 'b' },   // Ctrl+Shift+B
+  toggleMonitor: { ctrl: true, shift: true, alt: false, key: 'i' },     // Ctrl+Shift+I
   trayShowHide: { ctrl: true, shift: false, alt: false, key: 'm' },
 }
 

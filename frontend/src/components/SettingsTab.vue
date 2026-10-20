@@ -2371,7 +2371,7 @@ const shortcutCategories: { key: string; label: string; actions: ShortcutAction[
   {
     key: 'sidebar',
     label: 'shortcut.catSidebar',
-    actions: ['toggleSidebar', 'openQuickCommands', 'focusAI', 'openSettings'],
+    actions: ['toggleSidebar', 'openQuickCommands', 'focusAI', 'toggleFilePanel', 'toggleMonitor', 'openSettings'],
   },
   {
     key: 'terminal',

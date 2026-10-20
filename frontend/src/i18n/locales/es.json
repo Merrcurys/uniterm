@@ -1341,6 +1341,8 @@
   "shortcut.toggleTimestamps": "Alternar marcas de tiempo",
   "shortcut.zoomFontIn": "Aumentar el tamaño de letra del terminal",
   "shortcut.zoomFontOut": "Reducir el tamaño de letra del terminal",
+  "shortcut.toggleFilePanel": "Alternar panel de archivos",
+  "shortcut.toggleMonitor": "Alternar monitor",
   "shortcut.title": "Atajos",
   "shortcut.catTabs": "Pestañas y paneles",
   "shortcut.catSidebar": "Barra lateral y vistas",

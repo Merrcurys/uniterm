@@ -1341,6 +1341,8 @@
   "shortcut.toggleTimestamps": "Переключить время",
   "shortcut.zoomFontIn": "Увеличить размер шрифта терминала",
   "shortcut.zoomFontOut": "Уменьшить размер шрифта терминала",
+  "shortcut.toggleFilePanel": "Переключить панель файлов",
+  "shortcut.toggleMonitor": "Переключить монитор",
   "shortcut.title": "Горячие клавиши",
   "shortcut.catTabs": "Вкладки и панели",
   "shortcut.catSidebar": "Боковая панель и виды",
