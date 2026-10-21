@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { reactive } from 'vue'
+import { shallowReactive } from 'vue'
 import type { Panel, PanelStatus, ConnectionConfig } from '../types/workspace'
 import { DisableSessionOutputLog, RegisterSessionForPanel, UnregisterSession } from '../../bindings/github.com/ys-ll/uniterm/app'
 
