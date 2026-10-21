@@ -53,7 +53,7 @@ type RDPKeyboardCapture struct {
 	emit          func(RDPKeyEvent)
 }
 
-func NewRDPKeyboardCapture(emit func(RDPKeyEvent)) (*RDPKeyboardCapture, error) {
+func NewRDPKeyboardCapture(emit func(RDPKeyEvent), _ ...func(func())) (*RDPKeyboardCapture, error) {
 	c := &RDPKeyboardCapture{wake: make(chan struct{}, 1), done: make(chan struct{}), emit: emit}
 	ready := make(chan error, 1)
 	go c.run(ready)

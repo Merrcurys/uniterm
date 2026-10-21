@@ -12,11 +12,21 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/ys-ll/uniterm/backend/log"
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/ys-ll/uniterm/backend/log"
 )
 
-func (a *App) findMainWindow() uintptr { return 0 }
+func (a *App) findMainWindow() uintptr {
+	if a.win() == nil {
+		return 0
+	}
+	return uintptr(a.win().NativeWindow())
+}
+
+func additionalWindowOptions(options application.WebviewWindowOptions) application.WebviewWindowOptions {
+	options.Mac.WebviewPreferences.FullscreenEnabled.Set(true)
+	return options
+}
 
 // hideProcWindow is a no-op on non-Windows platforms: the console-flash issue
 // is Windows-specific (batch-file shims spawning cmd.exe). See app_windows.go.

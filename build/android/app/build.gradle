@@ -11,7 +11,7 @@ android {
     }
 
     defaultConfig {
-        applicationId "com.wails.app"
+        applicationId "net.uniterm.app"
         minSdk 21
         targetSdk 35
         // App version comes from the build chain (Taskfile passes -P

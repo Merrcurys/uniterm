@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/ys-ll/uniterm/backend/platform"
 	"github.com/ys-ll/uniterm/backend/session"
 	"golang.org/x/text/encoding"
@@ -236,11 +237,12 @@ func (a *App) SetSPICEKeyboardCapture(sessionID, captureID string, enabled bool)
 }
 
 func (a *App) setDesktopKeyboardCapture(sessionID, captureID string, enabled bool, sessionType string) (bool, error) {
-	a.rdpKeyboardMu.Lock()
-	defer a.rdpKeyboardMu.Unlock()
 	if !enabled {
-		if a.rdpKeyboard != nil {
-			a.rdpKeyboard.Release(captureID)
+		a.rdpKeyboardMu.Lock()
+		capture := a.rdpKeyboard
+		a.rdpKeyboardMu.Unlock()
+		if capture != nil {
+			capture.Release(captureID)
 		}
 		return false, nil
 	}
@@ -254,31 +256,36 @@ func (a *App) setDesktopKeyboardCapture(sessionID, captureID string, enabled boo
 	if s.Type() != sessionType || s.Status() != session.StatusConnected {
 		return false, fmt.Errorf("%s session is not connected", strings.ToUpper(sessionType))
 	}
+	a.rdpKeyboardMu.Lock()
 	if a.rdpKeyboard == nil {
 		capture, err := platform.NewRDPKeyboardCapture(func(event platform.RDPKeyEvent) {
 			if a.app != nil {
 				a.app.Event.Emit("remote-desktop:keyboard", event)
 			}
-		})
+		}, application.InvokeSync)
 		if err != nil {
+			a.rdpKeyboardMu.Unlock()
 			return false, err
 		}
 		a.rdpKeyboard = capture
 	}
+	capture := a.rdpKeyboard
+	a.rdpKeyboardMu.Unlock()
 	hwnd := a.mainHwnd
 	if hwnd == 0 {
 		hwnd = a.findMainWindow()
 	}
 	if sessionType == "vnc" || sessionType == "spice" {
-		return a.rdpKeyboard.SetShortcutCapture(captureID, hwnd), nil
+		return capture.SetShortcutCapture(captureID, hwnd), nil
 	}
-	return a.rdpKeyboard.SetCapture(captureID, hwnd), nil
+	return capture.SetCapture(captureID, hwnd), nil
 }
 
 func (a *App) closeRDPKeyboard() {
 	a.rdpKeyboardMu.Lock()
-	defer a.rdpKeyboardMu.Unlock()
-	if a.rdpKeyboard != nil {
-		a.rdpKeyboard.Close()
+	capture := a.rdpKeyboard
+	a.rdpKeyboardMu.Unlock()
+	if capture != nil {
+		capture.Close()
 	}
 }

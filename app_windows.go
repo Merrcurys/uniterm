@@ -29,6 +29,10 @@ import (
 	"golang.org/x/sys/windows/registry"
 )
 
+func additionalWindowOptions(options application.WebviewWindowOptions) application.WebviewWindowOptions {
+	return options
+}
+
 func (a *App) GetAvailableShells() []string {
 	var shells []string
 	var seen = make(map[string]bool)
