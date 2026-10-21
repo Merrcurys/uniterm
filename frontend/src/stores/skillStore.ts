@@ -1,7 +1,12 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { Events } from '@wailsio/runtime'
 import { ListSkills, GetSkillBody, SetSkillEnabled, SetSkillLocked, DeleteSkill, CreateSkill, SaveSkill, OpenPathInExplorer } from '../../bindings/github.com/ys-ll/uniterm/app'
 import type { SkillMeta } from '../types/skill'
+
+// Module-level un-subscriber for the sync-pull store:skills:changed listener,
+// tracked at module scope so re-imports under HMR detach the previous one.
+let unsubSkillsChanged: (() => void) | null = null
 
 export const useSkillStore = defineStore('skills', () => {
   const skills = ref<SkillMeta[]>([])
@@ -111,9 +116,20 @@ export const useSkillStore = defineStore('skills', () => {
     }
   }
 
+  // A sync pull may have rewritten the skills dir wholesale — force a
+  // re-list bypassing the load-once guard.
+  unsubSkillsChanged?.()
+  unsubSkillsChanged = Events.On('store:skills:changed', () => { void reload() })
+
+  function dispose() {
+    unsubSkillsChanged?.()
+    unsubSkillsChanged = null
+  }
+
   return {
     skills, loaded, enabledSkills,
     load, reload,
     toggleEnabled, toggleLocked, remove, create, save, saveByAgent, getBody, openFolder,
+    dispose,
   }
 })

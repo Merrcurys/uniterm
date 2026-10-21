@@ -1496,6 +1496,9 @@ func (a *App) syncableStores() []sync.SyncableStore {
 	if a.settingsStore != nil {
 		stores = append(stores, a.settingsStore)
 	}
+	if a.skillsStore != nil {
+		stores = append(stores, a.skillsStore)
+	}
 	return stores
 }
 
@@ -1541,6 +1544,9 @@ func (a *App) reloadStoresAfterSync() {
 		if data, err := a.tunnelStore.Load(); err == nil {
 			a.emit("store:tunnels:changed", data)
 		}
+	}
+	if a.skillsStore != nil {
+		a.emit("store:skills:changed", nil)
 	}
 }
 
