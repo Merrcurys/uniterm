@@ -76,6 +76,7 @@
           @dismiss="onDismiss"
         />
       </div>
+      <div v-if="aiStore.contextNotice" class="ai-context-notice" role="status">{{ aiStore.contextNotice }}</div>
       <div v-if="aiStore.isRunning || aiStore.pendingCommand || aiStore.pendingQuestion" class="ai-thinking">
         <div class="thinking-row" :title="t('ai.thinkingToggleHint')" @click="toggleThinking">
           <div class="thinking-text">{{ statusText }}</div>
@@ -325,7 +326,7 @@ import { useTabStore } from '../stores/tabStore'
 import { usePanelStore } from '../stores/panelStore'
 import { useI18n } from '../i18n'
 import { runAgent, approveTool, rejectTool, continueAgent, answerQuestion, dismissQuestion } from '../services/agent'
-import { CancelChatStream, SaveFileDialogFiltered, WriteFileBase64, ReadLocalAttachmentFile } from '../../bindings/github.com/ys-ll/uniterm/app'
+import { CancelChatStream, CancelAICompaction, SaveFileDialogFiltered, WriteFileBase64, ReadLocalAttachmentFile } from '../../bindings/github.com/ys-ll/uniterm/app'
 import type { AIAttachment, ExecutionMode } from '../types/ai'
 import {
   ATTACHMENT_FILE_ACCEPT,
@@ -1774,6 +1775,7 @@ function onStop() {
     return
   }
   CancelChatStream().catch(() => { /* ignore */ })
+  if (aiStore.compactionRequestId) CancelAICompaction(aiStore.compactionRequestId).catch(() => { /* ignore */ })
   aiStore.stop()
 }
 
@@ -2064,6 +2066,13 @@ defineExpose({ focusInput })
   user-select: text;
   -webkit-user-select: text;
 }
+.ai-context-notice {
+  padding: 0.5rem 0.75rem;
+  color: var(--el-color-warning);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
 .ai-thinking {
   display: flex;
   flex-direction: column;

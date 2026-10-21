@@ -1,6 +1,6 @@
 export type ExecutionMode = 'confirm_all' | 'confirm_write' | 'confirm_dangerous' | 'bypass'
 
-export type AIAgentStatus = 'thinking' | 'outputting' | 'executing' | 'confirming'
+export type AIAgentStatus = 'thinking' | 'outputting' | 'executing' | 'confirming' | 'compacting'
 
 export interface ToolCall {
   id: string
@@ -69,4 +69,12 @@ export interface AISession {
   createdAt: number
   updatedAt: number
   messages: AIMessage[]
+  contextSummary?: AIContextSummary
+}
+
+export interface AIContextSummary {
+  version: 1
+  content: string
+  throughMessageId: string
+  createdAt: number
 }

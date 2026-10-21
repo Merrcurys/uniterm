@@ -225,12 +225,7 @@ export const AVAILABLE_TOOLS = [
         timeout_ms: {
           type: 'integer',
           minimum: 1,
-          description: 'Maximum milliseconds to collect command output. Default 60000. Use 5000-10000 for quick commands, 30000-60000 for moderate tasks, 120000-300000 for long tasks. Expiry stops collection, not the terminal command.'
-        },
-        idle_ms: {
-          type: 'integer',
-          minimum: 1,
-          description: 'Terminal silence in milliseconds that completes output collection. Default 800. Silence does not guarantee that the process has exited.'
+          description: 'Maximum milliseconds to collect command output. Default 60000. Use 5000-10000 for quick commands, 30000-60000 for moderate tasks, 120000-300000 for long tasks. Waits for a shell completion signal until expiry. On timeout the command and output capture continue; use collect_output to resume.'
         },
         head_lines: {
           type: 'integer',
@@ -293,7 +288,7 @@ export const AVAILABLE_TOOLS = [
   },
   {
     name: 'collect_output',
-    description: 'Wait and collect terminal output WITHOUT sending any command or text to the terminal. Pure passive listening. Use this when a command is still running and you want to wait for more output. You can call this repeatedly to wait in stages.',
+    description: 'Wait and collect terminal output WITHOUT sending any command or text to the terminal. Resumes the original job and its unread buffered output; waits for completion or timeout, never terminal silence. Use this when a command is still running and you want to wait for more output. You can call this repeatedly to wait in stages.',
     input_schema: {
       type: 'object',
       properties: {
@@ -301,11 +296,6 @@ export const AVAILABLE_TOOLS = [
           type: 'integer',
           minimum: 1,
           description: 'Maximum milliseconds to collect output. Default 30000. Use 15000-30000 for active progress checks, 60000-120000 for slower operations.'
-        },
-        idle_ms: {
-          type: 'integer',
-          minimum: 1,
-          description: 'Terminal silence in milliseconds that completes output collection. Default 800. Silence does not guarantee that the process has exited.'
         },
         head_lines: {
           type: 'integer',
