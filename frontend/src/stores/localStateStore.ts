@@ -4,10 +4,13 @@ import { LoadLocalState, SaveLocalState } from '../../bindings/github.com/ys-ll/
 import type { MCPSettings } from '../types/mcp'
 import { DEFAULT_MCP_SETTINGS } from '../types/mcp'
 import type { SavedTabsSnapshot } from '../types/tabSnapshot'
+import type { AILocalState, AIReasoningPreference } from '../types/ai'
+import { normalizeReasoning } from '../services/aiReasoning'
 
 // Shape of the backend's LocalState store (bindings are untyped JS, so the
 // type is declared here and must stay in sync with backend/store).
 interface LocalState {
+  ai: AILocalState | null
   sidebarVisible: boolean
   aiSidebarVisible: boolean
   // Persisted sidebar widths in px (0 = old config, keep component default).
@@ -38,6 +41,7 @@ interface LocalState {
 }
 
 const DEFAULT: LocalState = {
+  ai: null,
   sidebarVisible: true,
   aiSidebarVisible: true,
   sidebarWidth: 240,
@@ -65,6 +69,8 @@ export const useLocalStateStore = defineStore('localState', () => {
   const state = ref<LocalState>({ ...DEFAULT })
   const loaded = ref(false)
   let initPromise: Promise<void> | null = null
+  let saveQueue: Promise<void> = Promise.resolve()
+  let savedAIJson = JSON.stringify(state.value.ai)
 
   async function init() {
     if (loaded.value) return
@@ -73,6 +79,12 @@ export const useLocalStateStore = defineStore('localState', () => {
         try {
           const s = await LoadLocalState()
           state.value = { ...DEFAULT, ...s } as LocalState
+          savedAIJson = JSON.stringify(state.value.ai)
+          if (state.value.ai) {
+            state.value.ai.modelPreferences = Object.fromEntries(
+              Object.entries(state.value.ai.modelPreferences || {}).map(([id, preference]) => [id, normalizeReasoning(preference)])
+            )
+          }
         } catch {
           // keep defaults
         } finally {
@@ -84,13 +96,42 @@ export const useLocalStateStore = defineStore('localState', () => {
   }
 
   async function update(patch: Partial<LocalState>) {
+    if (!loaded.value) await init()
     state.value = { ...state.value, ...patch } as LocalState
-    try {
-      await SaveLocalState(state.value as LocalState)
-    } catch {
-      // ignore save errors
+    // Preserve save order so a slower earlier write cannot undo a new selection.
+    const snapshot = JSON.parse(JSON.stringify(state.value)) as LocalState
+    const saved = saveQueue.then(async () => {
+      await SaveLocalState(snapshot)
+      savedAIJson = JSON.stringify(snapshot.ai)
+    })
+    saveQueue = saved.catch(() => {})
+    return saved.then(() => true, () => false)
+  }
+
+  async function ensureAISelection(modelIds: string[], legacyId = '') {
+    await init()
+    const previous = state.value.ai
+    const requested = previous?.activeModelId ?? legacyId
+    const activeModelId = modelIds.includes(requested) ? requested : (modelIds[0] || '')
+    const ai = { activeModelId, modelPreferences: previous?.modelPreferences || {} }
+    if (JSON.stringify(ai) !== savedAIJson) {
+      if (!await update({ ai })) throw new Error('Could not save AI selection')
     }
   }
 
-  return { state, loaded, init, update }
+  async function setActiveAIModel(id: string) {
+    await init()
+    if (!await update({ ai: { activeModelId: id, modelPreferences: state.value.ai?.modelPreferences || {} } })) throw new Error('Could not save AI selection')
+  }
+
+  async function setAIReasoning(modelId: string, preference: AIReasoningPreference) {
+    await init()
+    const saved = await update({ ai: {
+      activeModelId: state.value.ai?.activeModelId || modelId,
+      modelPreferences: { ...state.value.ai?.modelPreferences, [modelId]: normalizeReasoning(preference) },
+    } })
+    if (!saved) throw new Error('Could not save AI reasoning preferences')
+  }
+
+  return { state, loaded, init, update, ensureAISelection, setActiveAIModel, setAIReasoning }
 })

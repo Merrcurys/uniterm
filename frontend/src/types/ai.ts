@@ -2,6 +2,17 @@ export type ExecutionMode = 'confirm_all' | 'confirm_write' | 'confirm_dangerous
 
 export type AIAgentStatus = 'thinking' | 'outputting' | 'executing' | 'confirming' | 'compacting'
 
+export type AIReasoningEffort = 'default' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
+export interface AIReasoningPreference {
+  reasoningEffort: AIReasoningEffort
+}
+
+export interface AILocalState {
+  activeModelId: string
+  modelPreferences: Record<string, AIReasoningPreference>
+}
+
 export interface ToolCall {
   id: string
   type: 'function'

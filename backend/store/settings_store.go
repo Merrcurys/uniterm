@@ -130,9 +130,10 @@ type AIModelConfig struct {
 }
 
 type AISettings struct {
-	MaxTurns      *int            `json:"maxTurns"`
-	Models        []AIModelConfig `json:"models"`
-	ActiveModelID string          `json:"activeModelId"`
+	MaxTurns *int            `json:"maxTurns"`
+	Models   []AIModelConfig `json:"models"`
+	// Read only for migration to local_state.json. New clients omit this field.
+	ActiveModelID string `json:"activeModelId,omitempty"`
 }
 
 // MCPSettings configures the external-agent MCP server endpoint. Pointer on
@@ -427,7 +428,6 @@ func defaultAISettings() AISettings {
 				Protocol: "anthropic",
 			},
 		},
-		ActiveModelID: "model-default",
 	}
 }
 

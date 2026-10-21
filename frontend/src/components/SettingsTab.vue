@@ -1229,11 +1229,11 @@
             v-for="model in settingsStore.settings.ai.models"
             :key="model.id"
             class="model-card"
-            :class="{ active: model.id === settingsStore.settings.ai.activeModelId }"
+            :class="{ active: model.id === settingsStore.activeModelId }"
           >
             <div class="model-main">
               <el-radio
-                :model-value="settingsStore.settings.ai.activeModelId"
+                :model-value="settingsStore.activeModelId"
                 :value="model.id"
                 @change="settingsStore.setActiveModel(model.id)"
               >

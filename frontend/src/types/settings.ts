@@ -146,7 +146,6 @@ export const USER_AGENT_PRESETS: { label: string; value: string }[] = [
 export interface AISettings {
   maxTurns: number
   models: AIModelConfig[]
-  activeModelId: string
 }
 
 export type ShortcutAction =
@@ -412,7 +411,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
         protocol: 'anthropic' as const
       }
     ],
-    activeModelId: 'model-default'
   },
   keyboard: { ...DEFAULT_KEYBOARD },
   autoCheckUpdate: true,

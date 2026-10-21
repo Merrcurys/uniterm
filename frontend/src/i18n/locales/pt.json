@@ -1957,5 +1957,16 @@
   "settings.mcpClientHeadersDesc": "Cabeçalhos de pedido estáticos, p. ex., {\"Authorization\":\"Bearer ...\"} para transportes HTTP.",
   "settings.mcpClientHeadersInvalid": "Os cabeçalhos devem ser um objeto JSON válido",
   "settings.mcpClientRemove": "Remover servidor",
-  "settings.mcpClientRemoveConfirm": "Remover o servidor MCP «{name}»? As suas ferramentas deixarão de estar disponíveis para a IA."
+  "settings.mcpClientRemoveConfirm": "Remover o servidor MCP «{name}»? As suas ferramentas deixarão de estar disponíveis para a IA.",
+  "ai.compacting": "Organizando o contexto da conversa...",
+  "ai.compactionFailed": "Não foi possível gerar o resumo do contexto. Esta solicitação usa as últimas trocas completas; todo o histórico do chat é preservado.",
+  "ai.contextTooLarge": "A última troca ou as definições de ferramentas excedem o limite de contexto. Encurte a entrada, reduza a saída das ferramentas ou desative as ferramentas MCP que não estiver usando.",
+  "ai.reasoningEffort": "Intensidade",
+  "ai.reasoningSaveFailed": "Não foi possível salvar as preferências de IA",
+  "ai.reasoning.default": "Padrão",
+  "ai.reasoning.low": "Light",
+  "ai.reasoning.medium": "Medium",
+  "ai.reasoning.high": "High",
+  "ai.reasoning.xhigh": "Extra high",
+  "ai.reasoning.max": "Max"
 }

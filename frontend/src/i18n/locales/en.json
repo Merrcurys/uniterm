@@ -1961,5 +1961,13 @@
   "settings.mcpClientHeadersDesc": "Static request headers, e.g. {\"Authorization\":\"Bearer ...\"} for HTTP transports.",
   "settings.mcpClientHeadersInvalid": "Headers must be a valid JSON object",
   "settings.mcpClientRemove": "Remove server",
-  "settings.mcpClientRemoveConfirm": "Remove MCP server \"{name}\"? Its tools will no longer be available to the AI."
+  "settings.mcpClientRemoveConfirm": "Remove MCP server \"{name}\"? Its tools will no longer be available to the AI.",
+  "ai.reasoningEffort": "Effort",
+  "ai.reasoningSaveFailed": "Could not save AI preferences",
+  "ai.reasoning.default": "Default",
+  "ai.reasoning.low": "Light",
+  "ai.reasoning.medium": "Medium",
+  "ai.reasoning.high": "High",
+  "ai.reasoning.xhigh": "Extra high",
+  "ai.reasoning.max": "Max"
 }

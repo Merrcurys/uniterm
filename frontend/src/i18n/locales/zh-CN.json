@@ -1961,5 +1961,13 @@
   "settings.mcpClientHeadersDesc": "HTTP 传输的静态请求头，例如 {\"Authorization\":\"Bearer ...\"}。",
   "settings.mcpClientHeadersInvalid": "请求头必须是合法的 JSON 对象",
   "settings.mcpClientRemove": "删除服务器",
-  "settings.mcpClientRemoveConfirm": "删除 MCP 服务器「{name}」？其工具将不再对 AI 可用。"
+  "settings.mcpClientRemoveConfirm": "删除 MCP 服务器「{name}」？其工具将不再对 AI 可用。",
+  "ai.reasoningEffort": "强度",
+  "ai.reasoningSaveFailed": "保存 AI 偏好失败",
+  "ai.reasoning.default": "默认",
+  "ai.reasoning.low": "轻度",
+  "ai.reasoning.medium": "中",
+  "ai.reasoning.high": "高",
+  "ai.reasoning.xhigh": "极高",
+  "ai.reasoning.max": "最高"
 }

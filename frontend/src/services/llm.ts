@@ -3,8 +3,24 @@ import { Events } from '@wailsio/runtime'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useAIStore } from '../stores/aiStore'
 import { t } from '../i18n'
+import { useLocalStateStore } from '../stores/localStateStore'
+import type { AIModelConfig } from '../types/settings'
+import type { AIReasoningPreference } from '../types/ai'
+import { normalizeReasoning, reasoningParameters } from './aiReasoning'
+
+export interface ChatConfiguration {
+  model: AIModelConfig
+  reasoning: AIReasoningPreference
+}
+
+export function captureChatConfiguration(): ChatConfiguration | undefined {
+  const model = useSettingsStore().activeModel
+  if (!model) return undefined
+  return { model: { ...model }, reasoning: normalizeReasoning(useLocalStateStore().state.ai?.modelPreferences?.[model.id]) }
+}
 
 export interface ChatOptions {
+  configuration?: ChatConfiguration
   system: string
   messages: Array<Record<string, unknown>>
   tools?: Array<{
@@ -95,7 +111,8 @@ export function formatAttachmentError(raw: string): string | null {
 export async function chat(options: ChatOptions): Promise<void> {
   const settingsStore = useSettingsStore()
   const aiStore = useAIStore()
-  const activeModel = settingsStore.activeModel
+  const configuration = options.configuration || captureChatConfiguration()
+  const activeModel = configuration?.model || settingsStore.activeModel
 
   const sessionId = aiStore.currentSessionId || `uniterm-${Date.now()}`
 
@@ -115,6 +132,7 @@ export async function chat(options: ChatOptions): Promise<void> {
     system: options.system,
     messages: options.messages,
     tools: options.tools,
+    ...(activeModel ? reasoningParameters(activeModel, configuration?.reasoning) : {}),
   }
 
   const requestJSON = JSON.stringify(requestBody)

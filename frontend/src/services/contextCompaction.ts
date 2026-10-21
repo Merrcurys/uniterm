@@ -2,6 +2,7 @@ import { SummarizeAIContext } from '../../bindings/github.com/ys-ll/uniterm/app'
 import { useAIStore } from '../stores/aiStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import type { AIContextSummary } from '../types/ai'
+import type { AIModelConfig } from '../types/settings'
 import { t } from '../i18n'
 import { ChatCancelledError } from './llm'
 import {
@@ -10,7 +11,7 @@ import {
   CONTEXT_TARGET_TOKENS, SUMMARY_MAX_TOKENS,
 } from './aiContext'
 
-export async function prepareAgentContext(system: string, tools: unknown[], skipCompaction = false, isCurrent = () => true): Promise<{
+export async function prepareAgentContext(system: string, tools: unknown[], skipCompaction = false, isCurrent = () => true, modelSnapshot?: AIModelConfig): Promise<{
   messages: Array<Record<string, unknown>>
   failed: boolean
 }> {
@@ -45,7 +46,7 @@ export async function prepareAgentContext(system: string, tools: unknown[], skip
   let summary: AIContextSummary | undefined
   let failed = skipCompaction
   if (!skipCompaction) {
-    const configuredModel = useSettingsStore().activeModel
+    const configuredModel = modelSnapshot || useSettingsStore().activeModel
     const model = configuredModel ? { ...configuredModel } : undefined
     const requestId = `compact-${crypto.randomUUID()}`
     store.compactionRequestId = requestId
