@@ -1,6 +1,7 @@
 <template>
   <div class="db-tree-panel">
 
+
     <div class="search-wrap">
       <input
         v-model="searchQuery"
@@ -272,6 +273,7 @@ async function loadTree() {
 }
 
 watch(() => props.sessionId, (newId) => {
+
   if (newId) loadTree()
 }, { immediate: true })
 
