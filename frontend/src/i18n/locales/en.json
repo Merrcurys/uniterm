@@ -570,6 +570,8 @@
   "settings.modelModelPlaceholder": "Select or enter a model name",
   "settings.modelApiKey": "API Key",
   "settings.modelUserAgent": "User-Agent",
+  "settings.modelSessionHeader": "Session Header",
+  "settings.modelSessionHeaderPlaceholder": "e.g. session-id (empty = not sent)",
   "settings.modelProxyPlaceholder": "No proxy (direct connection)",
   "settings.modelProtocol": "Protocol",
   "settings.modelProvider": "Provider",

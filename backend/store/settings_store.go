@@ -122,6 +122,11 @@ type AIModelConfig struct {
 	// ProxyId references a saved outbound proxy (proxies.json) used for all
 	// HTTP traffic to this model's BaseURL. Empty = direct connection.
 	ProxyID string `json:"proxyId,omitempty"`
+	// SessionHeader names an HTTP header that each request to this model's
+	// BaseURL carries with the current chat session's ID as the value —
+	// for gateways that do prompt caching / sticky routing per session
+	// (issue #1170). Empty = no such header.
+	SessionHeader string `json:"sessionHeader,omitempty"`
 }
 
 type AISettings struct {

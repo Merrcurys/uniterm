@@ -105,6 +105,7 @@ export async function chat(options: ChatOptions): Promise<void> {
   const protocol = activeModel?.protocol || 'anthropic'
   const userAgent = activeModel?.userAgent || ''
   const proxyId = activeModel?.proxyId || ''
+  const sessionHeader = activeModel?.sessionHeader || ''
 
   if (!apiKey) throw new Error('API key not configured')
 
@@ -139,7 +140,8 @@ export async function chat(options: ChatOptions): Promise<void> {
       protocol,
       userAgent,
       proxyId,
-      sessionId
+      sessionId,
+      sessionHeader
     )
   } catch (e: any) {
     const raw = e?.message || String(e)

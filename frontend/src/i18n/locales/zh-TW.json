@@ -570,6 +570,8 @@
   "settings.modelModelPlaceholder": "選擇或輸入模型名稱",
   "settings.modelApiKey": "API 金鑰",
   "settings.modelUserAgent": "使用者代理",
+  "settings.modelSessionHeader": "會話 ID 頭",
+  "settings.modelSessionHeaderPlaceholder": "例如 session-id（留空則不發送）",
   "settings.modelProxyPlaceholder": "不使用代理（直連）",
   "settings.modelProtocol": "協議",
   "settings.modelProvider": "提供商",

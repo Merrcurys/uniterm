@@ -81,7 +81,7 @@ func TestChatCompletionOpenAI_ReasoningContent(t *testing.T) {
 		"max_tokens": 1024,
 		"messages":   []interface{}{map[string]interface{}{"role": "user", "content": "hi"}},
 	}
-	result, err := (&App{}).chatCompletionOpenAI("k", srv.URL, "deepseek-r1", reqBody, "test", "", srv.Client())
+	result, err := (&App{}).chatCompletionOpenAI("k", srv.URL, "deepseek-r1", reqBody, "test", "", "", srv.Client())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,19 +151,24 @@ func (f llmRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 
 func TestChatCompletionOpenAI_SessionHeader(t *testing.T) {
 	tests := []struct {
-		name      string
-		baseURL   string
-		sessionID string
-		want      string
+		name       string
+		baseURL    string
+		sessionID  string
+		header     string
+		wantHeader string // expected x-opencode-session value
 	}{
-		{"OpenCode Go", "https://opencode.ai/zen/go/v1", "session-123", "session-123"},
-		{"OpenCode Go inference", "https://opencode.ai/inference/go/openai/v1", "session-123", "session-123"},
-		{"inference empty session", "https://opencode.ai/inference/go/openai/v1", "", ""},
-		{"empty session", "https://opencode.ai/zen/go/v1", "", ""},
-		{"OpenCode Zen", "https://opencode.ai/zen/v1", "session-123", ""},
-		{"OpenAI", "https://api.openai.com/v1", "session-123", ""},
-		{"OpenRouter", "https://openrouter.ai/api/v1", "session-123", ""},
-		{"local provider", "http://localhost:11434/v1", "session-123", ""},
+		{"OpenCode Go", "https://opencode.ai/zen/go/v1", "session-123", "", "session-123"},
+		{"OpenCode Go inference", "https://opencode.ai/inference/go/openai/v1", "session-123", "", "session-123"},
+		{"inference empty session", "https://opencode.ai/inference/go/openai/v1", "", "", ""},
+		{"empty session", "https://opencode.ai/zen/go/v1", "", "", ""},
+		{"OpenCode Zen", "https://opencode.ai/zen/v1", "session-123", "", ""},
+		{"OpenAI", "https://api.openai.com/v1", "session-123", "", ""},
+		{"OpenRouter", "https://openrouter.ai/api/v1", "session-123", "", ""},
+		{"local provider", "http://localhost:11434/v1", "session-123", "", ""},
+		// A configured session header replaces the opencode fallback entirely.
+		{"custom header replaces fallback", "https://opencode.ai/zen/go/v1", "session-123", "session-id", ""},
+		{"custom header no session", "https://opencode.ai/zen/go/v1", "", "session-id", ""},
+		{"custom header on openai", "https://api.openai.com/v1", "session-123", "session-id", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -180,19 +185,56 @@ func TestChatCompletionOpenAI_SessionHeader(t *testing.T) {
 				"max_tokens": 1024,
 				"messages":   []interface{}{map[string]interface{}{"role": "user", "content": "hi"}},
 			}
-			if _, err := (&App{}).chatCompletionOpenAI("k", tt.baseURL, "model", reqBody, "test", tt.sessionID, client); err != nil {
+			if _, err := (&App{}).chatCompletionOpenAI("k", tt.baseURL, "model", reqBody, "test", tt.sessionID, tt.header, client); err != nil {
 				t.Fatal(err)
 			}
 			if got == nil {
 				t.Fatal("no HTTP request sent")
 			}
-			if value := got.Get("x-opencode-session"); value != tt.want {
-				t.Fatalf("x-opencode-session = %q, want %q", value, tt.want)
+			if value := got.Get("x-opencode-session"); value != tt.wantHeader {
+				t.Fatalf("x-opencode-session = %q, want %q", value, tt.wantHeader)
 			}
-			if tt.want == "" && got.Values("x-opencode-session") != nil {
+			if tt.wantHeader == "" && got.Values("x-opencode-session") != nil {
 				t.Fatal("x-opencode-session must be absent")
 			}
+			// With a configured header, the session ID must arrive there.
+			if tt.header != "" {
+				if value := got.Get(tt.header); value != tt.sessionID {
+					t.Fatalf("%s = %q, want %q", tt.header, value, tt.sessionID)
+				}
+			}
 		})
+	}
+}
+
+// TestChatCompletionAnthropic_SessionHeader verifies the model-configured
+// session header (issue #1170) on the Anthropic path, including that the
+// built-in opencode fallback stays off for non-opencode base URLs.
+func TestChatCompletionAnthropic_SessionHeader(t *testing.T) {
+	var got http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		w.Header().Set("Content-Type", sseContentType)
+		fmt.Fprint(w, "data: {\"type\":\"message_start\",\"message\":{\"role\":\"assistant\"}}\n\n")
+		fmt.Fprint(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
+		fmt.Fprint(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"ok\"}}\n\n")
+		fmt.Fprint(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
+		fmt.Fprint(w, "data: {\"type\":\"message_stop\"}\n\n")
+	}))
+	defer srv.Close()
+
+	reqBody := map[string]interface{}{
+		"max_tokens": 1024,
+		"messages":   []interface{}{map[string]interface{}{"role": "user", "content": "hi"}},
+	}
+	if _, err := (&App{}).chatCompletionAnthropic("k", srv.URL, "claude", reqBody, "test", "session-9", "session-id", srv.Client()); err != nil {
+		t.Fatal(err)
+	}
+	if value := got.Get("Session-Id"); value != "session-9" {
+		t.Fatalf("Session-Id = %q, want %q", value, "session-9")
+	}
+	if got.Values("x-opencode-session") != nil {
+		t.Fatal("x-opencode-session must be absent for a non-opencode base URL")
 	}
 }
 
@@ -220,7 +262,7 @@ func TestChatCompletionAnthropic_ThinkingBlocks(t *testing.T) {
 		"max_tokens": 1024,
 		"messages":   []interface{}{map[string]interface{}{"role": "user", "content": "hi"}},
 	}
-	result, err := (&App{}).chatCompletionAnthropic("k", srv.URL, "claude", reqBody, "test", srv.Client())
+	result, err := (&App{}).chatCompletionAnthropic("k", srv.URL, "claude", reqBody, "test", "", "", srv.Client())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -726,7 +768,7 @@ func TestChatCompletionWireFormats(t *testing.T) {
 			path:     "/v1/messages",
 			protocol: "anthropic",
 			call: func(a *App, base string, body map[string]interface{}, c *http.Client) (string, error) {
-				return a.chatCompletionAnthropic("k", base, "claude", body, "test", c)
+				return a.chatCompletionAnthropic("k", base, "claude", body, "test", "", "", c)
 			},
 			assert: func(t *testing.T, sent map[string]interface{}) {
 				block := firstUserBlock(t, sent, "messages")
@@ -744,7 +786,7 @@ func TestChatCompletionWireFormats(t *testing.T) {
 			path:     "/chat/completions",
 			protocol: "openai",
 			call: func(a *App, base string, body map[string]interface{}, c *http.Client) (string, error) {
-				return a.chatCompletionOpenAI("k", base, "gpt", body, "test", "", c)
+				return a.chatCompletionOpenAI("k", base, "gpt", body, "test", "", "", c)
 			},
 			assert: func(t *testing.T, sent map[string]interface{}) {
 				block := firstUserBlock(t, sent, "messages")
@@ -762,7 +804,7 @@ func TestChatCompletionWireFormats(t *testing.T) {
 			path:     "/responses",
 			protocol: "responses",
 			call: func(a *App, base string, body map[string]interface{}, c *http.Client) (string, error) {
-				return a.chatCompletionResponses("k", base, "gpt", body, "test", c)
+				return a.chatCompletionResponses("k", base, "gpt", body, "test", "", "", c)
 			},
 			assert: func(t *testing.T, sent map[string]interface{}) {
 				block := firstUserBlock(t, sent, "input")
@@ -857,7 +899,7 @@ func TestChatCompletionRejectsOversizedAttachmentBeforeSending(t *testing.T) {
 		"messages": []interface{}{
 			map[string]interface{}{"role": "user", "content": []interface{}{imageBlock("image/png", oversized)}},
 		},
-	}), "openai", "test", "", "")
+	}), "openai", "test", "", "", "")
 	if !errors.Is(err, errAttachmentTooLarge) {
 		t.Fatalf("want %v, got %v", errAttachmentTooLarge, err)
 	}

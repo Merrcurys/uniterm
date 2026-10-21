@@ -126,7 +126,7 @@ func injectCacheControl(reqBody map[string]interface{}) {
 // ChatCompletion streams the Anthropic API response via SSE, emitting Wails
 // events for each token while collecting the full message. It returns the
 // complete message JSON when the stream ends (backward-compatible).
-func (a *App) ChatCompletion(apiKey, baseURL, model string, requestJSON string, protocol string, userAgent string, proxyID string, sessionID string) (string, error) {
+func (a *App) ChatCompletion(apiKey, baseURL, model string, requestJSON string, protocol string, userAgent string, proxyID string, sessionID string, sessionHeader string) (string, error) {
 	// Parse the incoming request body (always Anthropic format from frontend)
 	var reqBody map[string]interface{}
 	if err := json.Unmarshal([]byte(requestJSON), &reqBody); err != nil {
@@ -151,11 +151,26 @@ func (a *App) ChatCompletion(apiKey, baseURL, model string, requestJSON string, 
 
 	switch protocol {
 	case "openai":
-		return a.chatCompletionOpenAI(apiKey, baseURL, model, reqBody, userAgent, sessionID, client)
+		return a.chatCompletionOpenAI(apiKey, baseURL, model, reqBody, userAgent, sessionID, sessionHeader, client)
 	case "responses":
-		return a.chatCompletionResponses(apiKey, baseURL, model, reqBody, userAgent, client)
+		return a.chatCompletionResponses(apiKey, baseURL, model, reqBody, userAgent, sessionID, sessionHeader, client)
 	}
-	return a.chatCompletionAnthropic(apiKey, baseURL, model, reqBody, userAgent, client)
+	return a.chatCompletionAnthropic(apiKey, baseURL, model, reqBody, userAgent, sessionID, sessionHeader, client)
+}
+
+// applySessionHeader stamps the model's configured per-session header (issue
+// #1170) onto the outgoing request with the current chat session's ID as the
+// value, for gateways that key prompt caching / sticky routing on it. A model
+// with no header configured still gets the built-in x-opencode-session on
+// opencode.ai endpoints so existing configs keep working.
+func applySessionHeader(req *http.Request, sessionHeader, sessionID, baseURL string) {
+	if sessionHeader != "" && sessionID != "" {
+		req.Header.Set(http.CanonicalHeaderKey(sessionHeader), sessionID)
+		return
+	}
+	if sessionID != "" && isOpenCodeGoBaseURL(baseURL) {
+		req.Header.Set("x-opencode-session", sessionID)
+	}
 }
 
 // llmClientFor returns the HTTP client for the model's proxy selection:
@@ -208,7 +223,7 @@ func proxyTransportURL(p *session.SocksProxy) (*url.URL, error) {
 }
 
 // chatCompletionAnthropic handles the native Anthropic Messages API with SSE streaming.
-func (a *App) chatCompletionAnthropic(apiKey, baseURL, model string, reqBody map[string]interface{}, userAgent string, client *http.Client) (string, error) {
+func (a *App) chatCompletionAnthropic(apiKey, baseURL, model string, reqBody map[string]interface{}, userAgent string, sessionID string, sessionHeader string, client *http.Client) (string, error) {
 	// Computed once so a non-200 response can be reported as a readable
 	// attachment error when the request carried images (FR-6).
 	hasImages := requestHasImageAttachment(reqBody)
@@ -250,6 +265,7 @@ func (a *App) chatCompletionAnthropic(apiKey, baseURL, model string, reqBody map
 	req.Header.Set("anthropic-version", "2023-06-01")
 	req.Header.Set("anthropic-beta", "prompt-caching-2024-07-31")
 	req.Header.Set("User-Agent", userAgent)
+	applySessionHeader(req, sessionHeader, sessionID, baseURL)
 
 	// Use the shared client so this path honors the same system/env proxy
 	// resolution and connection pool as the OpenAI/Responses paths.
@@ -605,7 +621,7 @@ func isOpenCodeGoBaseURL(baseURL string) bool {
 // chatCompletionOpenAI converts the Anthropic-format request to OpenAI,
 // calls the OpenAI Chat Completions API with SSE streaming, and converts
 // the response back to Anthropic format so the frontend sees no difference.
-func (a *App) chatCompletionOpenAI(apiKey, baseURL, model string, reqBody map[string]interface{}, userAgent string, sessionID string, client *http.Client) (string, error) {
+func (a *App) chatCompletionOpenAI(apiKey, baseURL, model string, reqBody map[string]interface{}, userAgent string, sessionID string, sessionHeader string, client *http.Client) (string, error) {
 	// Computed once so a non-200 response can be reported as a readable
 	// attachment error when the request carried images (FR-6).
 	hasImages := requestHasImageAttachment(reqBody)
@@ -678,10 +694,7 @@ func (a *App) chatCompletionOpenAI(apiKey, baseURL, model string, reqBody map[st
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("User-Agent", userAgent)
-
-	if sessionID != "" && isOpenCodeGoBaseURL(baseURL) {
-		req.Header.Set("x-opencode-session", sessionID)
-	}
+	applySessionHeader(req, sessionHeader, sessionID, baseURL)
 
 	res, err := client.Do(req)
 	if err != nil {
@@ -1105,7 +1118,7 @@ func convertAnthropicMessageToResponses(msg map[string]interface{}) []map[string
 // Responses API, calls /responses with SSE streaming, and converts the response
 // events back to Anthropic-format events so the frontend sees no difference.
 // Stateless: full history is sent as `input` each turn; reasoning items are ignored.
-func (a *App) chatCompletionResponses(apiKey, baseURL, model string, reqBody map[string]interface{}, userAgent string, client *http.Client) (string, error) {
+func (a *App) chatCompletionResponses(apiKey, baseURL, model string, reqBody map[string]interface{}, userAgent string, sessionID string, sessionHeader string, client *http.Client) (string, error) {
 	// Computed once so a non-200 response can be reported as a readable
 	// attachment error when the request carried images (FR-6).
 	hasImages := requestHasImageAttachment(reqBody)
@@ -1174,6 +1187,7 @@ func (a *App) chatCompletionResponses(apiKey, baseURL, model string, reqBody map
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("User-Agent", userAgent)
+	applySessionHeader(req, sessionHeader, sessionID, baseURL)
 
 	res, err := client.Do(req)
 	if err != nil {
