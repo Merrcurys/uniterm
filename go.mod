@@ -8,6 +8,7 @@ require (
 	github.com/cloudsoda/go-smb2 v0.0.0-20260701064823-d8c5600d73b8
 	github.com/creack/pty v1.1.24
 	github.com/danieljoos/wincred v1.2.3
+	github.com/ebitengine/purego v0.11.2
 	github.com/go-git/go-git/v5 v5.19.2
 	github.com/go-sql-driver/mysql v1.10.0
 	github.com/google/uuid v1.6.0
