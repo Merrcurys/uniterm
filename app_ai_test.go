@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -11,7 +13,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/ys-ll/uniterm/backend/store"
 )
@@ -952,5 +956,281 @@ func TestMCPClientUpdateRenamesWithoutCreatingDuplicate(t *testing.T) {
 	all, err = a.mcpClientStore.Load()
 	if err != nil || len(all) != 2 {
 		t.Fatalf("failed rename changed store: %+v %v", all, err)
+	}
+}
+
+func TestSummarizeAIContextProtocols(t *testing.T) {
+	for _, protocol := range []string{"anthropic", "openai", "responses"} {
+		t.Run(protocol, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]interface{}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Error(err)
+					return
+				}
+				if body["stream"] != false || body["tools"] != nil {
+					t.Error("summary must be non-streaming and tool-free")
+				}
+				if r.Header.Get("User-Agent") != "test-agent" {
+					t.Error("user agent lost")
+				}
+				switch protocol {
+				case "anthropic":
+					if r.URL.Path != "/v1/messages" || r.Header.Get("x-api-key") != "test-key" {
+						t.Error("wrong Anthropic endpoint/auth")
+					}
+					fmt.Fprint(w, `{"stop_reason":"end_turn","content":[{"type":"thinking","thinking":"hidden"},{"type":"text","text":"handoff"}]}`)
+				case "responses":
+					if r.URL.Path != "/v1/responses" || r.Header.Get("Authorization") != "Bearer test-key" {
+						t.Error("wrong Responses endpoint/auth")
+					}
+					if !strings.Contains(body["input"].(string), "prior goal") {
+						t.Error("previous summary lost")
+					}
+					fmt.Fprint(w, `{"status":"completed","output":[{"type":"reasoning","summary":[]},{"type":"message","content":[{"type":"output_text","text":"handoff"}]}]}`)
+				default:
+					if r.URL.Path != "/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer test-key" {
+						t.Error("wrong Chat Completions endpoint/auth")
+					}
+					fmt.Fprint(w, `{"choices":[{"finish_reason":"stop","message":{"content":"handoff"}}]}`)
+				}
+			}))
+			defer server.Close()
+			app := &App{}
+			var chatCancelled atomic.Bool
+			chatCancel := context.CancelFunc(func() { chatCancelled.Store(true) })
+			app.chatCancel.Store(&chatCancel)
+			got, err := app.SummarizeAIContext("test-key", server.URL+"/v1", "test-model", protocol, "test-agent", "", "request", "prior goal", "observed result")
+			if err != nil || got != "handoff" {
+				t.Fatalf("summary = %q, %v", got, err)
+			}
+			if chatCancelled.Load() || app.chatCancel.Load() != &chatCancel {
+				t.Fatal("summary changed chat cancellation")
+			}
+			if _, exists := app.compactionCancels.Load("request"); exists {
+				t.Fatal("request cancellation leaked")
+			}
+		})
+	}
+}
+
+func TestSummarizeAIContextCancellationIsIsolated(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	defer server.Close()
+	defer close(release)
+	app := &App{}
+	otherCtx, otherCancel := context.WithCancel(context.Background())
+	defer otherCancel()
+	app.compactionCancels.Store("other-request", otherCancel)
+	done := make(chan error, 1)
+	go func() {
+		_, err := app.SummarizeAIContext("k", server.URL, "m", "openai", "", "", "cancel-me", "", "history")
+		done <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("request did not start")
+	}
+	app.CancelAICompaction("cancel-me")
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("want cancelled, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancellation did not finish")
+	}
+	if otherCtx.Err() != nil {
+		t.Fatal("cancelled another summary")
+	}
+	app.CancelAICompaction("already-finished")
+}
+
+func TestParseAISummaryRejectsIncompleteResults(t *testing.T) {
+	cases := []struct{ protocol, data string }{
+		{"openai", `{"choices":[{"finish_reason":"length","message":{"content":"partial"}}]}`},
+		{"openai", `{"choices":[{"finish_reason":"stop","message":{"content":""}}]}`},
+		{"anthropic", `{"stop_reason":"max_tokens","content":[{"type":"text","text":"partial"}]}`},
+		{"responses", `{"status":"incomplete","output":[{"type":"message","content":[{"type":"output_text","text":"partial"}]}]}`},
+		{"responses", `{"error":{"message":"failed"}}`},
+		{"openai", `not json`},
+	}
+	for _, c := range cases {
+		if _, err := parseAISummary([]byte(c.data), c.protocol); err == nil {
+			t.Errorf("accepted invalid %s summary", c.protocol)
+		}
+	}
+}
+
+func TestOpenAIConversionPreservesHandoffAndUserText(t *testing.T) {
+	for _, role := range []string{"user", "assistant"} {
+		messages := convertAnthropicMessageToOpenAI(map[string]interface{}{
+			"role": role,
+			"content": []interface{}{
+				map[string]interface{}{"type": "text", "text": "historical handoff"},
+				map[string]interface{}{"type": "text", "text": "current user request"},
+			},
+		})
+		if len(messages) != 1 || messages[0]["content"] != "historical handoff\n\ncurrent user request" {
+			t.Fatalf("lost text blocks: %#v", messages)
+		}
+	}
+}
+
+func TestAISummaryClientAllowsSlowNonStreamingHeaders(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(100 * time.Millisecond)
+		fmt.Fprint(w, `{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"handoff"}]}]}`)
+	}))
+	defer server.Close()
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil // Local fixture must not populate the process-wide env proxy cache.
+	transport.ResponseHeaderTimeout = 20 * time.Millisecond
+	shared := &http.Client{Transport: transport, Timeout: 50 * time.Millisecond}
+	defer shared.CloseIdleConnections()
+	// Reproduce the old path: it fails before the non-streaming answer is ready.
+	if response, err := shared.Get(server.URL); err == nil {
+		response.Body.Close()
+		t.Fatal("expected the original short header timeout")
+	}
+	client := aiSummaryClient(shared)
+	defer client.CloseIdleConnections()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
+	response, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("summary inherited streaming timeout: %v", err)
+	}
+	response.Body.Close()
+	if transport.ResponseHeaderTimeout != 20*time.Millisecond || shared.Timeout != 50*time.Millisecond {
+		t.Fatal("summary mutated the shared chat client")
+	}
+	// Removing the early header timeout must still honor cancellation/deadline.
+	expired, stop := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer stop()
+	req, _ = http.NewRequestWithContext(expired, http.MethodGet, server.URL, nil)
+	if response, err := client.Do(req); err == nil {
+		response.Body.Close()
+		t.Fatal("summary ignored its request deadline")
+	} else if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("unexpected deadline error: %v", err)
+	}
+}
+
+func TestAISummaryClientPreservesNegotiatedHTTPProtocols(t *testing.T) {
+	for _, h2 := range []bool{true, false} {
+		t.Run(fmt.Sprintf("http2=%v", h2), func(t *testing.T) {
+			server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprint(w, "summary response")
+			}))
+			server.EnableHTTP2 = true
+			server.StartTLS()
+			defer server.Close()
+			shared := server.Client()
+			transport := shared.Transport.(*http.Transport)
+			transport.ForceAttemptHTTP2 = h2
+			if !h2 {
+				transport.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
+			}
+			response, err := shared.Get(server.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			io.Copy(io.Discard, response.Body)
+			response.Body.Close()
+			wanted := response.ProtoMajor
+			if h2 && wanted != 2 {
+				t.Fatal("fixture did not negotiate HTTP/2")
+			}
+			// The app's standard transport automatically enables h2 with this
+			// flag false. Model that initialized state with the fixture TLS roots.
+			transport.ForceAttemptHTTP2 = false
+			client := aiSummaryClient(shared)
+			defer client.CloseIdleConnections()
+			response, err = client.Get(server.URL)
+			if err != nil {
+				t.Fatalf("cloned summary client lost protocol support: %v", err)
+			}
+			defer response.Body.Close()
+			if response.ProtoMajor != wanted {
+				t.Fatalf("protocol changed: %s, wanted HTTP/%d", response.Proto, wanted)
+			}
+		})
+	}
+}
+
+func TestResponsesStreamErrorDetails(t *testing.T) {
+	cases := []struct {
+		name, data string
+		want       []string
+	}{
+		{"top-level", `{"type":"error","code":"ModelResponseError","message":"generation failed","param":"input"}`, []string{"ModelResponseError", "generation failed", "input"}},
+		{"nested", `{"type":"error","error":{"code":"RateLimitExceeded","message":"try later","request_id":"body-id"}}`, []string{"RateLimitExceeded", "try later"}},
+		{"failed-response", `{"type":"response.failed","response":{"id":"resp-1","error":{"code":"context_length_exceeded","message":"input too long"},"output":[{"text":"PRIVATE_OUTPUT"}],"input":"PRIVATE_INPUT"}}`, []string{"context_length_exceeded", "input too long", "resp-1"}},
+		{"incomplete", `{"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}}}`, []string{"incomplete", "max_output_tokens"}},
+		{"message-only", `{"type":"error","error":"provider unavailable"}`, []string{"provider unavailable"}},
+		{"no-details", `{"type":"error"}`, []string{"without code or message"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := responsesStreamError([]byte(tc.data), "error", "trace-id").Error()
+			for _, part := range append(tc.want, "trace-id") {
+				if !strings.Contains(got, part) {
+					t.Errorf("missing %q in %s", part, got)
+				}
+			}
+			if strings.Contains(got, "PRIVATE_") || strings.Contains(got, "output_index") {
+				t.Fatalf("unrelated payload fields leaked: %s", got)
+			}
+		})
+	}
+}
+
+func TestResponsesStreamFailureEvents(t *testing.T) {
+	cases := []struct{ name, stream, want string }{
+		{"upstream error", "data: {\"type\":\"error\",\"code\":\"ModelResponseError\",\"message\":\"generation failed\"}\n\n", "ModelResponseError"},
+		{"event name without space", "event: error\ndata:{\"error\":{\"code\":\"TooManyRequests\",\"message\":\"slow down\"}}\n\n", "TooManyRequests"},
+		{"response failed", "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"InternalError\",\"message\":\"backend failure\"}}}\n\n", "InternalError"},
+		{"response incomplete", "data: {\"type\":\"response.incomplete\",\"response\":{\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}}\n\n", "max_output_tokens"},
+		{"EOF after tool", "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"call_id\":\"c\",\"name\":\"execute_command\"}}\n\ndata: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":0,\"delta\":\"{}\"}\n\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0}\n\n", "stream ended without response.completed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.Header().Set("X-Tt-Logid", "volc-trace-id")
+				fmt.Fprint(w, tc.stream)
+			}))
+			defer srv.Close()
+			result, err := (&App{}).chatCompletionResponses("k", srv.URL, "glm-5.3-flash", map[string]interface{}{}, "test", srv.Client())
+			if err == nil || result != "" {
+				t.Fatalf("incomplete response accepted: result=%s error=%v", result, err)
+			}
+			if !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "volc-trace-id") {
+				t.Fatalf("lost diagnosis: %v", err)
+			}
+		})
+	}
+}
+
+func TestResponsesCompletedStreamStillSucceeds(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\"}}\n\ndata: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"delta\":\"hello\"}\n\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0}\n\ndata: {\"type\":\"response.completed\"}\n\n")
+	}))
+	defer srv.Close()
+	result, err := (&App{}).chatCompletionResponses("k", srv.URL, "glm-5.3-flash", map[string]interface{}{}, "test", srv.Client())
+	if err != nil || !strings.Contains(result, "hello") {
+		t.Fatalf("completed stream failed: %s, %v", result, err)
 	}
 }

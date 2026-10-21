@@ -996,6 +996,13 @@ func (p ptyAdapter) OnStatusChange(cb func(string)) func() {
 
 func (p ptyAdapter) Alive() bool { return p.s.Status() == session.StatusConnected }
 
+func (p ptyAdapter) ForegroundShell() string {
+	if shell, ok := p.s.(interface{ ForegroundShell() string }); ok {
+		return shell.ForegroundShell()
+	}
+	return ""
+}
+
 // newlineFor returns the Enter bytes the shell expects. Windows OpenSSH and
 // PowerShell need CR; POSIX shells accept LF (the frontend mirrors this).
 func newlineFor(s session.Session) string {
@@ -1028,7 +1035,7 @@ const (
 // entry for the live-terminal path: the MCP server's foreground toolset and
 // the built-in AI panel's execute path both come through here, so MCP foreground job's
 // per-session busy lock applies to both consumers equally.
-func (a *App) StartForeground(sessionID, command string, idleMs, hardLimitMs int) (string, error) {
+func (a *App) StartForeground(sessionID, command string, hardLimitMs int) (string, error) {
 	if a.sessionManager == nil {
 		return "", errors.New("session manager not initialized")
 	}
@@ -1042,7 +1049,6 @@ func (a *App) StartForeground(sessionID, command string, idleMs, hardLimitMs int
 	}
 	job, err := a.jobRegistry().StartWithScreen(
 		pty, sessionID, command, newlineFor(s),
-		time.Duration(idleMs)*time.Millisecond,
 		time.Duration(hardLimitMs)*time.Millisecond,
 		mcp.DefaultMaxOutput,
 		screenCols, screenRows,
@@ -1075,7 +1081,7 @@ func (a *App) PollForeground(jobID string, offset, max int) (stdout, stderr []by
 
 // StartForegroundCapture passively collects terminal output using the same
 // job engine and completion rules as foreground command execution.
-func (a *App) StartForegroundCapture(sessionID string, idleMs, hardLimitMs int) (string, error) {
+func (a *App) StartForegroundCapture(sessionID string, hardLimitMs int) (string, error) {
 	if a.sessionManager == nil {
 		return "", errors.New("session manager not initialized")
 	}
@@ -1083,12 +1089,15 @@ func (a *App) StartForegroundCapture(sessionID string, idleMs, hardLimitMs int) 
 	if !ok {
 		return "", fmt.Errorf("session not found: %s", sessionID)
 	}
+	if job, ok := a.jobRegistry().Collect(sessionID, time.Duration(hardLimitMs)*time.Millisecond); ok {
+		return job.ID, nil
+	}
 	p := ptyAdapter{s: s}
 	if taps, ok := s.(tapSource); ok {
 		p.taps = taps
 	}
 	job, err := a.jobRegistry().ObserveWithScreen(p, sessionID,
-		time.Duration(idleMs)*time.Millisecond, time.Duration(hardLimitMs)*time.Millisecond,
+		time.Duration(hardLimitMs)*time.Millisecond,
 		screenCols, screenRows)
 	if err != nil {
 		return "", err
