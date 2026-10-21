@@ -950,6 +950,14 @@ const actionHandlers: Record<ShortcutAction, () => void> = {
       nextTick(() => sidebarRef.value?.focusSearch())
     }
   },
+  toggleFilePanel: () => {
+    // 切换文件边栏（需当前面板支持，如 SSH/WSL/容器 exec 终端）
+    companionStore.toggleFiles()
+  },
+  toggleMonitor: () => {
+    // 切换资源监控边栏（需当前面板支持，如 SSH 终端）
+    companionStore.toggleMonitor()
+  },
   openQuickCommands: () => {
     sidebarVisible.value = true
     nextTick(() => sidebarRef.value?.openQuickCommands())

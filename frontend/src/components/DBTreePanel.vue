@@ -246,7 +246,13 @@ async function loadTree() {
     let autoOpen = ''
     if (props.defaultDbName && dbs.includes(props.defaultDbName)) {
       const tables = await GetTables(props.sessionId, props.defaultDbName)
-      databases.value = [{ name: props.defaultDbName, tables, loaded: true }]
+      // 默认库置顶并展开（已加载表），其余可访问的数据库折叠显示，
+      // 点击展开时再懒加载表（见 ensureDbExpanded）。
+      const otherDbs = dbs.filter(d => d !== props.defaultDbName)
+      databases.value = [
+        { name: props.defaultDbName, tables, loaded: true },
+        ...otherDbs.map(d => ({ name: d, tables: [] as TableInfo[], loaded: false }))
+      ]
       expandedDbs.value = new Set([props.defaultDbName])
       autoOpen = props.defaultDbName
     } else if (dbs.length === 1) {

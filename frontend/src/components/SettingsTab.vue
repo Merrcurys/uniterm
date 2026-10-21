@@ -1456,6 +1456,35 @@
     <!-- Model Form Dialog -->
     <el-dialog append-to-body v-model="showModelForm" :title="editingModel ? t('settings.editModel') : t('settings.newModel')" width="25rem">
       <el-form label-width="5rem">
+        <el-form-item label="预设">
+          <el-select
+            v-model="selectedPreset"
+            style="width: 100%"
+            filterable
+            :placeholder="t('settings.modelPresetPlaceholder')"
+            @change="applyPreset"
+          >
+            <el-option-group label="国内主流">
+              <el-option label="DeepSeek (深度求索)" value="deepseek" />
+              <el-option label="通义千问 (阿里)" value="qwen" />
+              <el-option label="智谱 GLM" value="zhipu" />
+              <el-option label="文心一言 (百度)" value="wenxin" />
+              <el-option label="Moonshot (月之暗面)" value="moonshot" />
+              <el-option label="MiniMax" value="minimax" />
+              <el-option label="零一万物 (Yi)" value="lingyi" />
+            </el-option-group>
+            <el-option-group label="国际主流">
+              <el-option label="OpenAI GPT" value="openai" />
+              <el-option label="Anthropic Claude" value="claude" />
+              <el-option label="Google Gemini" value="gemini" />
+            </el-option-group>
+            <el-option-group label="本地部署">
+              <el-option label="Ollama (本地)" value="ollama" />
+              <el-option label="vLLM (本地)" value="vllm" />
+              <el-option label="LM Studio (本地)" value="lmstudio" />
+            </el-option-group>
+          </el-select>
+        </el-form-item>
         <el-form-item :label="t('settings.modelName')">
           <el-input v-model="modelForm.name" />
         </el-form-item>
@@ -2342,7 +2371,7 @@ const shortcutCategories: { key: string; label: string; actions: ShortcutAction[
   {
     key: 'sidebar',
     label: 'shortcut.catSidebar',
-    actions: ['toggleSidebar', 'openQuickCommands', 'focusAI', 'openSettings'],
+    actions: ['toggleSidebar', 'openQuickCommands', 'focusAI', 'toggleFilePanel', 'toggleMonitor', 'openSettings'],
   },
   {
     key: 'terminal',
@@ -2845,9 +2874,51 @@ const modelForm = reactive({
   proxyId: '' as string,
 })
 
+// ── Model quick presets ──────────────────────────────────────────
+// Each preset pre-fills protocol + baseURL + model so the user only
+// needs to enter their API key.  Domestic providers (DeepSeek, Qwen,
+// GLM …) all expose an OpenAI-compatible /v1/chat/completions endpoint,
+// so we use the 'openai' protocol for them.
+interface ModelPreset {
+  name: string
+  protocol: 'anthropic' | 'openai' | 'responses'
+  baseURL: string
+  model: string
+}
+
+const MODEL_PRESETS: Record<string, ModelPreset> = {
+  deepseek:  { name: 'DeepSeek',         protocol: 'openai',    baseURL: 'https://api.deepseek.com/v1',                        model: 'deepseek-chat' },
+  qwen:      { name: '通义千问',          protocol: 'openai',    baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus' },
+  zhipu:     { name: '智谱GLM',           protocol: 'openai',    baseURL: 'https://open.bigmodel.cn/api/paas/v4',              model: 'glm-4-plus' },
+  wenxin:    { name: '文心一言',          protocol: 'openai',    baseURL: 'https://qianfan.baidubce.com/v2',                   model: 'ernie-4.0-8k' },
+  moonshot:  { name: 'Moonshot',          protocol: 'openai',    baseURL: 'https://api.moonshot.cn/v1',                         model: 'moonshot-v1-8k' },
+  minimax:   { name: 'MiniMax',           protocol: 'openai',    baseURL: 'https://api.minimax.chat/v1',                       model: 'abab6.5-chat' },
+  lingyi:    { name: '零一万物',          protocol: 'openai',    baseURL: 'https://api.lingyiwanwu.com/v1',                    model: 'yi-large' },
+  openai:    { name: 'OpenAI GPT',        protocol: 'openai',    baseURL: 'https://api.openai.com/v1',                         model: 'gpt-4o' },
+  claude:    { name: 'Anthropic Claude',  protocol: 'anthropic', baseURL: 'https://api.anthropic.com',                          model: 'claude-sonnet-4-20250514' },
+  gemini:    { name: 'Google Gemini',     protocol: 'openai',    baseURL: 'https://generativelanguage.googleapis.com/v1beta',  model: 'gemini-2.0-flash' },
+  ollama:    { name: 'Ollama (本地)',     protocol: 'openai',    baseURL: 'http://localhost:11434/v1',                         model: 'llama3' },
+  vllm:      { name: 'vLLM (本地)',       protocol: 'openai',    baseURL: 'http://localhost:8000/v1',                          model: '' },
+  lmstudio:  { name: 'LM Studio (本地)',  protocol: 'openai',    baseURL: 'http://localhost:1234/v1',                          model: '' },
+}
+
+const selectedPreset = ref('')
+
+function applyPreset(key: string) {
+  const preset = MODEL_PRESETS[key]
+  if (!preset) return
+  modelForm.name = preset.name
+  modelForm.protocol = preset.protocol
+  modelForm.baseURL = preset.baseURL
+  modelForm.model = preset.model
+  // Clear any stale@fetch@ed model suggestions so the preset model shows cleanly.
+  modelSuggestions.value = []
+}
+
 function openNewModelForm() {
   editingModel.value = null
   resetModelForm()
+  selectedPreset.value = ''
   testResult.value = null
   testError.value = ''
   showModelForm.value = true
@@ -2856,6 +2927,7 @@ function openNewModelForm() {
 function editModel(model: AIModelConfig) {
   editingModel.value = model
   modelSuggestions.value = []
+  selectedPreset.value = ''
   testResult.value = null
   testError.value = ''
   Object.assign(modelForm, { ...model })
