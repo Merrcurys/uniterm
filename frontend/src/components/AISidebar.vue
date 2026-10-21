@@ -257,16 +257,29 @@
               <span class="hash-btn-icon">/</span>
             </button>
             <template v-if="settingsStore.settings.ai.models.length > 0">
-              <button class="ghost-btn model-btn" :title="currentModelName" @click.stop="modelMenuRef?.toggle($event.currentTarget)">{{ currentModelName }}</button>
+              <button class="ghost-btn model-btn" :title="currentModelName" @click.stop="modelMenuRef?.toggle($event.currentTarget)">
+                <span>{{ currentModelName }}</span>
+                <span v-if="reasoningPreference.reasoningEffort !== 'default'" class="model-effort">{{ reasoningLabel(reasoningPreference.reasoningEffort) }}</span>
+                <ChevronDown :size="12" />
+              </button>
               <Menu ref="modelMenuRef" v-model:visible="modelMenuVisible">
                 <MenuItem
                   v-for="m in settingsStore.settings.ai.models"
                   :key="m.id"
-                  :class="{ active: m.id === settingsStore.settings.ai.activeModelId }"
+                  :class="{ active: m.id === settingsStore.activeModelId }"
                   @click="onModelSelect(m.id)"
                 >
                   <span>{{ m.name }}</span>
                 </MenuItem>
+                <MenuDivider />
+                <MenuSubmenu :label="`${t('ai.reasoningEffort')}: ${reasoningLabel(reasoningPreference.reasoningEffort)}`"
+                  :disabled="!settingsStore.activeModel || !!aiStore.pendingCommand || !!aiStore.pendingQuestion">
+                  <MenuItem v-for="effort in REASONING_EFFORTS" :key="effort"
+                    :class="{ active: reasoningPreference.reasoningEffort === effort }"
+                    @click.stop="selectReasoning({ reasoningEffort: effort as AIReasoningEffort })">
+                    {{ reasoningLabel(effort) }}
+                  </MenuItem>
+                </MenuSubmenu>
                 <MenuDivider />
                 <MenuItem iconic :icon="Plus" @click="onModelSelect('__add_model__')">
                   {{ t('settings.addModel') }}
@@ -327,7 +340,8 @@ import { usePanelStore } from '../stores/panelStore'
 import { useI18n } from '../i18n'
 import { runAgent, approveTool, rejectTool, continueAgent, answerQuestion, dismissQuestion } from '../services/agent'
 import { CancelChatStream, CancelAICompaction, SaveFileDialogFiltered, WriteFileBase64, ReadLocalAttachmentFile } from '../../bindings/github.com/ys-ll/uniterm/app'
-import type { AIAttachment, ExecutionMode } from '../types/ai'
+import type { AIAttachment, ExecutionMode, AIReasoningPreference, AIReasoningEffort } from '../types/ai'
+import { REASONING_EFFORTS, normalizeReasoning } from '../services/aiReasoning'
 import {
   ATTACHMENT_FILE_ACCEPT,
   ATTACHMENT_LIMITS,
@@ -346,6 +360,7 @@ import { isMobilePlatform } from '../utils/platform'
 import AIMessage from './AIMessage.vue'
 import Menu from './Menu.vue'
 import MenuItem from './MenuItem.vue'
+import MenuSubmenu from './MenuSubmenu.vue'
 import { Clipboard } from '@wailsio/runtime'
 import MenuDivider from './MenuDivider.vue'
 import { writeClipboard } from '../composables/useClipboardWrite'
@@ -969,9 +984,25 @@ const modeLabel = computed(() => {
 })
 
 const currentModelName = computed(() => {
-  const m = settingsStore.settings.ai.models.find(m => m.id === settingsStore.settings.ai.activeModelId)
+  const m = settingsStore.activeModel
   return m?.name || 'Model'
 })
+
+const reasoningPreference = computed(() => {
+  const model = settingsStore.activeModel
+  return normalizeReasoning(model ? useLocalStateStore().state.ai?.modelPreferences?.[model.id] : undefined)
+})
+function reasoningLabel(value: string) { return t(`ai.reasoning.${value}`) }
+async function selectReasoning(patch: Partial<AIReasoningPreference>) {
+  const model = settingsStore.activeModel
+  if (!model || aiStore.pendingCommand || aiStore.pendingQuestion) return
+  closeMenus()
+  try {
+    await useLocalStateStore().setAIReasoning(model.id, normalizeReasoning({ ...reasoningPreference.value, ...patch }))
+  } catch {
+    ElMessage.error(t('ai.reasoningSaveFailed'))
+  }
+}
 
 const busy = computed(() => aiStore.isRunning || !!aiStore.pendingCommand || !!aiStore.pendingQuestion)
 
@@ -1472,7 +1503,7 @@ function onModelChange(modelId: string) {
     })
     return
   }
-  settingsStore.setActiveModel(modelId)
+  settingsStore.setActiveModel(modelId)?.catch(() => ElMessage.error(t('ai.reasoningSaveFailed')))
 }
 
 function formatRelativeTime(timestamp: number): string {
@@ -2316,11 +2347,13 @@ defineExpose({ focusInput })
   display: flex;
   gap: 0.125rem;
   align-items: center;
+  min-width: 0;
 }
 .input-actions-right {
   display: flex;
   gap: 0.375rem;
   align-items: center;
+  flex-shrink: 0;
 }
 /* Ghost buttons: no border/background by default, reveal on hover */
 .ghost-btn {
@@ -2350,7 +2383,25 @@ defineExpose({ focusInput })
   opacity: 0.4;
 }
 .model-btn {
-  max-width: 6rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+  max-width: 10rem;
+}
+.model-btn > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.model-btn > svg,
+.model-effort {
+  flex-shrink: 0;
+}
+.model-effort {
+  margin-left: 0.25rem;
+  color: var(--text-disabled);
+  font-size: 0.625rem;
 }
 .add-model-btn {
   display: inline-flex;

@@ -1957,5 +1957,16 @@
   "settings.mcpClientHeadersDesc": "Tiêu đề yêu cầu cố định, ví dụ: {\"Authorization\":\"Bearer ...\"} cho giao thức HTTP.",
   "settings.mcpClientHeadersInvalid": "Tiêu đề phải là một đối tượng JSON hợp lệ",
   "settings.mcpClientRemove": "Xóa máy chủ",
-  "settings.mcpClientRemoveConfirm": "Xóa máy chủ MCP \"{name}\"? AI sẽ không còn sử dụng được các công cụ của máy chủ này."
+  "settings.mcpClientRemoveConfirm": "Xóa máy chủ MCP \"{name}\"? AI sẽ không còn sử dụng được các công cụ của máy chủ này.",
+  "ai.compacting": "Đang sắp xếp ngữ cảnh hội thoại...",
+  "ai.compactionFailed": "Không thể tạo bản tóm tắt ngữ cảnh. Yêu cầu này sử dụng các lượt trao đổi hoàn chỉnh gần đây; toàn bộ lịch sử trò chuyện vẫn được giữ lại.",
+  "ai.contextTooLarge": "Lượt trao đổi mới nhất hoặc định nghĩa công cụ vượt quá giới hạn ngữ cảnh. Hãy rút ngắn nội dung nhập, giảm đầu ra của công cụ hoặc tắt các công cụ MCP không sử dụng.",
+  "ai.reasoningEffort": "Mức độ",
+  "ai.reasoningSaveFailed": "Không thể lưu tùy chọn AI",
+  "ai.reasoning.default": "Mặc định",
+  "ai.reasoning.low": "Light",
+  "ai.reasoning.medium": "Medium",
+  "ai.reasoning.high": "High",
+  "ai.reasoning.xhigh": "Extra high",
+  "ai.reasoning.max": "Max"
 }

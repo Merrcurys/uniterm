@@ -642,6 +642,16 @@ func (a *App) chatCompletionOpenAI(apiKey, baseURL, model string, reqBody map[st
 		"stream":     true,
 		"max_tokens": reqBody["max_tokens"],
 	}
+	for _, key := range []string{"thinking", "reasoning_effort"} {
+		if value, ok := reqBody[key]; ok {
+			openaiBody[key] = value
+		}
+	}
+	// Native OpenAI reasoning models use a combined reasoning/answer limit.
+	if isOfficialOpenAIURL(baseURL) && (strings.HasPrefix(model, "gpt-5") || strings.HasPrefix(model, "gpt-6") || strings.HasPrefix(model, "o1") || strings.HasPrefix(model, "o3") || strings.HasPrefix(model, "o4")) {
+		delete(openaiBody, "max_tokens")
+		openaiBody["max_completion_tokens"] = reqBody["max_tokens"]
+	}
 
 	// Convert tools
 	if tools, ok := reqBody["tools"].([]interface{}); ok {
@@ -1137,6 +1147,11 @@ func (a *App) chatCompletionResponses(apiKey, baseURL, model string, reqBody map
 	respBody := map[string]interface{}{
 		"model":  model,
 		"stream": true,
+	}
+	for _, key := range []string{"thinking", "reasoning"} {
+		if value, ok := reqBody[key]; ok {
+			respBody[key] = value
+		}
 	}
 	if mt, ok := reqBody["max_tokens"]; ok {
 		respBody["max_output_tokens"] = mt

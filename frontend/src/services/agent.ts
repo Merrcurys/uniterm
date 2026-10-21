@@ -1,4 +1,4 @@
-import { chat, AVAILABLE_TOOLS, ChatCancelledError, ChatTimeoutError } from './llm'
+import { chat, AVAILABLE_TOOLS, ChatCancelledError, ChatTimeoutError, captureChatConfiguration } from './llm'
 import { prepareAgentContext } from './contextCompaction'
 import { executeCommand, startCommand, captureTerminal, collectOutput, sendTerminalKey } from './terminalAgent'
 import type { ExecuteResult } from './terminalAgent'
@@ -434,6 +434,9 @@ export async function runAgent(userInput: string, skillName?: string, skillBody?
     return
   }
 
+  // A menu change applies to the next run, never halfway through a tool loop.
+  const configuration = captureChatConfiguration()
+
   // Auto-reject any pending command/question from previous turn
   if (userInput && store.pendingCommand) {
     store.addMessage({
@@ -627,6 +630,7 @@ export async function runAgent(userInput: string, skillName?: string, skillBody?
     const toolUses: Array<{ id: string; name: string; input: Record<string, unknown> }> = []
 
     const chatOptions: any = {
+      configuration,
       system: buildSystemPrompt(),
       messages: [],
       tools: mergedTools,
@@ -642,7 +646,7 @@ export async function runAgent(userInput: string, skillName?: string, skillBody?
     }
     try {
       store.status = 'thinking'
-      const prepared = await prepareAgentContext(chatOptions.system, mergedTools, compactionFailed, () => runGeneration === activeGeneration)
+      const prepared = await prepareAgentContext(chatOptions.system, mergedTools, compactionFailed, () => runGeneration === activeGeneration, configuration?.model)
       compactionFailed ||= prepared.failed
       if (store.stopRequested || runGeneration !== activeGeneration) throw new ChatCancelledError()
       chatOptions.messages = prepared.messages

@@ -20,6 +20,72 @@ import (
 	"github.com/ys-ll/uniterm/backend/store"
 )
 
+func TestAIReasoningParametersReachEachProtocol(t *testing.T) {
+	for _, protocol := range []string{"openai", "responses", "anthropic"} {
+		t.Run(protocol, func(t *testing.T) {
+			body := map[string]interface{}{"max_tokens": 16384, "messages": []interface{}{}, "thinking": map[string]interface{}{"type": "enabled"}}
+			var expectedField string
+			var stream string
+			switch protocol {
+			case "openai":
+				expectedField = "reasoning_effort"
+				body[expectedField] = "high"
+				stream = "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n"
+			case "responses":
+				expectedField = "reasoning"
+				body[expectedField] = map[string]interface{}{"effort": "high"}
+				stream = "data: {\"type\":\"response.completed\"}\n\n"
+			default:
+				expectedField = "output_config"
+				body[expectedField] = map[string]interface{}{"effort": "high"}
+				stream = "data: {\"type\":\"message_stop\"}\n\n"
+			}
+			client := &http.Client{Transport: llmRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+				var outgoing map[string]interface{}
+				if err := json.NewDecoder(req.Body).Decode(&outgoing); err != nil {
+					t.Fatal(err)
+				}
+				actual, _ := json.Marshal(outgoing[expectedField])
+				want, _ := json.Marshal(body[expectedField])
+				if string(actual) != string(want) || outgoing["thinking"] == nil {
+					t.Fatalf("lost reasoning parameters: %s", actual)
+				}
+				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(stream))}, nil
+			})}
+			app := &App{}
+			var err error
+			switch protocol {
+			case "openai":
+				_, err = app.chatCompletionOpenAI("key", "https://gateway.example/v1", "alias", body, "test", "session", "", client)
+			case "responses":
+				_, err = app.chatCompletionResponses("key", "https://gateway.example/v1", "alias", body, "test", "session", "", client)
+			default:
+				_, err = app.chatCompletionAnthropic("key", "https://gateway.example", "alias", body, "test", "session", "", client)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestNativeOpenAIReasoningOutputLimit(t *testing.T) {
+	client := &http.Client{Transport: llmRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		var body map[string]interface{}
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["max_tokens"] != nil || body["max_completion_tokens"] != float64(16384) {
+			t.Fatalf("invalid reasoning output budget: %#v", body)
+		}
+		return &http.Response{StatusCode: 400, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"error":{"message":"reasoning effort is not supported"}}`))}, nil
+	})}
+	_, err := (&App{}).chatCompletionOpenAI("key", "https://api.openai.com/v1", "gpt-5.2", map[string]interface{}{"max_tokens": 16384, "reasoning_effort": "max"}, "test", "session", "", client)
+	if err == nil || !strings.Contains(err.Error(), "reasoning effort is not supported") {
+		t.Fatalf("provider error was hidden: %v", err)
+	}
+}
+
 // TestLLMProxyEnvFallback verifies that llmProxy resolves proxies declared
 // via the HTTP_PROXY/HTTPS_PROXY environment variables (go-ieproxy prefers
 // explicit env vars over the OS system proxy config).
@@ -1212,7 +1278,7 @@ func TestResponsesStreamFailureEvents(t *testing.T) {
 				fmt.Fprint(w, tc.stream)
 			}))
 			defer srv.Close()
-			result, err := (&App{}).chatCompletionResponses("k", srv.URL, "glm-5.3-flash", map[string]interface{}{}, "test", srv.Client())
+			result, err := (&App{}).chatCompletionResponses("k", srv.URL, "glm-5.3-flash", map[string]interface{}{}, "test", "", "", srv.Client())
 			if err == nil || result != "" {
 				t.Fatalf("incomplete response accepted: result=%s error=%v", result, err)
 			}
@@ -1229,7 +1295,7 @@ func TestResponsesCompletedStreamStillSucceeds(t *testing.T) {
 		fmt.Fprint(w, "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\"}}\n\ndata: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"delta\":\"hello\"}\n\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0}\n\ndata: {\"type\":\"response.completed\"}\n\n")
 	}))
 	defer srv.Close()
-	result, err := (&App{}).chatCompletionResponses("k", srv.URL, "glm-5.3-flash", map[string]interface{}{}, "test", srv.Client())
+	result, err := (&App{}).chatCompletionResponses("k", srv.URL, "glm-5.3-flash", map[string]interface{}{}, "test", "", "", srv.Client())
 	if err != nil || !strings.Contains(result, "hello") {
 		t.Fatalf("completed stream failed: %s, %v", result, err)
 	}

@@ -1960,5 +1960,13 @@
   "settings.mcpClientHeadersDesc": "固定的請求標頭，例如 HTTP 傳輸使用的 {\"Authorization\":\"Bearer ...\"}。",
   "settings.mcpClientHeadersInvalid": "標頭必須是有效的 JSON 物件",
   "settings.mcpClientRemove": "移除伺服器",
-  "settings.mcpClientRemoveConfirm": "要移除 MCP 伺服器「{name}」嗎？AI 將無法再使用其工具。"
+  "settings.mcpClientRemoveConfirm": "要移除 MCP 伺服器「{name}」嗎？AI 將無法再使用其工具。",
+  "ai.reasoningEffort": "強度",
+  "ai.reasoningSaveFailed": "儲存 AI 偏好失敗",
+  "ai.reasoning.default": "預設",
+  "ai.reasoning.low": "輕度",
+  "ai.reasoning.medium": "中",
+  "ai.reasoning.high": "高",
+  "ai.reasoning.xhigh": "極高",
+  "ai.reasoning.max": "最高"
 }

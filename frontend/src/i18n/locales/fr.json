@@ -1957,5 +1957,16 @@
   "settings.mcpClientHeadersDesc": "En-têtes de requête statiques, p. ex. {\"Authorization\":\"Bearer ...\"} pour les transports HTTP.",
   "settings.mcpClientHeadersInvalid": "Les en-têtes doivent être un objet JSON valide",
   "settings.mcpClientRemove": "Supprimer le serveur",
-  "settings.mcpClientRemoveConfirm": "Supprimer le serveur MCP « {name} » ? Ses outils ne seront plus accessibles à l’IA."
+  "settings.mcpClientRemoveConfirm": "Supprimer le serveur MCP « {name} » ? Ses outils ne seront plus accessibles à l’IA.",
+  "ai.compacting": "Organisation du contexte de la conversation...",
+  "ai.compactionFailed": "La génération du résumé du contexte a échoué. Cette requête utilise les derniers échanges complets ; l’intégralité de l’historique reste conservée.",
+  "ai.contextTooLarge": "Le dernier échange ou les définitions des outils dépassent le budget de contexte. Raccourcissez la saisie, réduisez la sortie des outils ou désactivez les outils MCP inutilisés.",
+  "ai.reasoningEffort": "Intensité",
+  "ai.reasoningSaveFailed": "Impossible d’enregistrer les préférences de l’IA",
+  "ai.reasoning.default": "Par défaut",
+  "ai.reasoning.low": "Light",
+  "ai.reasoning.medium": "Medium",
+  "ai.reasoning.high": "High",
+  "ai.reasoning.xhigh": "Extra high",
+  "ai.reasoning.max": "Max"
 }
