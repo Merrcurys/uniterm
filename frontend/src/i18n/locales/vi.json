@@ -570,6 +570,8 @@
   "settings.modelModelPlaceholder": "Chọn hoặc nhập tên mô hình",
   "settings.modelApiKey": "API Key",
   "settings.modelUserAgent": "User-Agent",
+  "settings.modelSessionHeader": "Header phiên",
+  "settings.modelSessionHeaderPlaceholder": "vd: session-id (để trống = không gửi)",
   "settings.modelProxyPlaceholder": "Không dùng proxy (kết nối trực tiếp)",
   "settings.modelProtocol": "Giao thức",
   "settings.modelProvider": "Provider",

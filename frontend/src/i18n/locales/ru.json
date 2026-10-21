@@ -570,6 +570,8 @@
   "settings.modelModelPlaceholder": "Выберите или введите имя модели",
   "settings.modelApiKey": "API-ключ",
   "settings.modelUserAgent": "User-Agent",
+  "settings.modelSessionHeader": "Заголовок сессии",
+  "settings.modelSessionHeaderPlaceholder": "напр. session-id (пусто = не отправлять)",
   "settings.modelProxyPlaceholder": "Без прокси (напрямую)",
   "settings.modelProtocol": "Протокол",
   "settings.modelProvider": "Provider",

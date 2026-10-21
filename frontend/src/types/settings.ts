@@ -127,6 +127,11 @@ export interface AIModelConfig {
   // Reference to a saved outbound proxy (proxies.json) for all traffic to
   // this model's baseURL. Empty/undefined = direct connection.
   proxyId?: string
+  // HTTP header name that every request to this model's baseURL carries
+  // with the current chat session's ID as the value — for gateways that do
+  // prompt caching / sticky routing per session (issue #1170).
+  // Empty/undefined = no such header.
+  sessionHeader?: string
 }
 
 export const USER_AGENT_PRESETS: { label: string; value: string }[] = [

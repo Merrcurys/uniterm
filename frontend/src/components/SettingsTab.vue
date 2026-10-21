@@ -1220,7 +1220,7 @@
               <div class="setting-title">{{ t('settings.modelList') }}</div>
               <div class="setting-desc">{{ t('settings.modelListDesc') }}</div>
             </div>
-            <div class="setting-control">
+            <div class="setting-control action-control">
               <el-button @click="openNewModelForm"><Plus :size="'0.875rem'" /> {{ t('settings.addModel') }}</el-button>
             </div>
           </div>
@@ -1242,6 +1242,9 @@
               <span class="model-detail">{{ model.model }} @ {{ model.baseURL }}</span>
             </div>
             <div class="model-actions">
+              <el-button link :title="t('common.copy')" @click="duplicateModel(model)">
+                <el-icon><Copy :size="'0.875rem'" /></el-icon>
+              </el-button>
               <el-button link @click="editModel(model)">
                 <el-icon><Pencil :size="'0.875rem'" /></el-icon>
               </el-button>
@@ -1534,6 +1537,9 @@
             </el-button>
           </div>
         </el-form-item>
+        <el-form-item :label="t('settings.modelSessionHeader')">
+          <el-input v-model="modelForm.sessionHeader" :placeholder="t('settings.modelSessionHeaderPlaceholder')" />
+        </el-form-item>
         <el-form-item :label="t('settings.modelModel')">
           <div class="model-fetch-row">
             <el-select
@@ -1642,7 +1648,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, watch, computed, onMounted, onUnmounted, onActivated } from 'vue'
-import { Settings, Monitor, MessageCircleMore, Info, RefreshCw, Pencil, Trash2, Globe, Keyboard, Plus, BookOpen, Wrench, FolderOpen, Key, Network, ArrowRightLeft, ChevronLeft, ChevronRight, ChevronDown, Plug, Server } from '@lucide/vue'
+import { Settings, Monitor, MessageCircleMore, Info, RefreshCw, Pencil, Copy, Trash2, Globe, Keyboard, Plus, BookOpen, Wrench, FolderOpen, Key, Network, ArrowRightLeft, ChevronLeft, ChevronRight, ChevronDown, Plug, Server } from '@lucide/vue'
 import { msg } from '../services/message'
 import { FetchModels, ChatCompletion, GetPlatform, GetAllFonts, GetDefaultSessionLogDir, OpenDirectoryDialog, OpenFileDialogFiltered, SetBackgroundImage, ClearBackgroundImage, GetBackgroundImage, RelaunchApp, ListExternalEditors, GenerateMCPToken, RevokeMCPToken, ListMCPTokens, GetMCPStatus, ListMCPClients, SaveMCPClient, UpdateMCPClient, RemoveMCPClient, TestMCPClient, MCPClientStatuses } from '../../bindings/github.com/ys-ll/uniterm/app'
 import { useSettingsStore } from '../stores/settingsStore'
@@ -2882,6 +2888,7 @@ const modelForm = reactive({
   protocol: 'anthropic' as 'anthropic' | 'openai' | 'responses',
   userAgent: 'uniTerm' as string,
   proxyId: '' as string,
+  sessionHeader: '' as string,
 })
 
 // ── Provider quick presets ───────────────────────────────────────
@@ -3105,6 +3112,20 @@ async function removeModelConfirm(model: AIModelConfig) {
   }
 }
 
+// Copy an existing model as a new entry (name suffixed with "copy"; a
+// numeric suffix when that name is taken too). The duplicate starts
+// inactive with a fresh id.
+function duplicateModel(model: AIModelConfig) {
+  const names = new Set(settingsStore.settings.ai.models.map(m => m.name))
+  let name = `${model.name} copy`
+  for (let i = 2; names.has(name); i++) name = `${model.name} copy ${i}`
+  settingsStore.addModel({
+    ...model,
+    id: `model-${Date.now()}`,
+    name,
+  })
+}
+
 function saveModel() {
   if (editingModel.value) {
     settingsStore.updateModel(editingModel.value.id, { ...modelForm })
@@ -3117,7 +3138,8 @@ function saveModel() {
       apiKey: modelForm.apiKey,
       protocol: modelForm.protocol,
       userAgent: modelForm.userAgent || undefined,
-      proxyId: modelForm.proxyId || undefined
+      proxyId: modelForm.proxyId || undefined,
+      sessionHeader: modelForm.sessionHeader || undefined
     })
   }
   showModelForm.value = false
@@ -3134,6 +3156,7 @@ function resetModelForm() {
   modelForm.protocol = 'anthropic'
   modelForm.userAgent = 'uniTerm'
   modelForm.proxyId = ''
+  modelForm.sessionHeader = ''
   modelSuggestions.value = []
 }
 
@@ -3181,7 +3204,8 @@ async function testConnection() {
       modelForm.protocol,
       modelForm.userAgent || '',
       modelForm.proxyId || '',
-      `uniterm-test-${Date.now()}`
+      `uniterm-test-${Date.now()}`,
+      modelForm.sessionHeader || ''
     )
     testResult.value = true
     msg.success(t('settings.testSuccess'))
@@ -3446,6 +3470,15 @@ async function onToggleSystemTitleBar(v: boolean) {
 /* Switch-only cards (e.g. the MCP enable toggle) hug the right edge
    instead of honoring the wide select-oriented min-width. */
 .setting-control.switch-control {
+  min-width: 0;
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Action-button controls (e.g. the model list's "Add model") hug the right
+   edge too — the select-oriented min-width leaves a lone button floating
+   mid-card otherwise. */
+.setting-control.action-control {
   min-width: 0;
   display: flex;
   justify-content: flex-end;
