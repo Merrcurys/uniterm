@@ -284,9 +284,27 @@ Issues, suggestions, and feedback are welcome at [GitHub Issues](https://github.
 
 Thanks to the following people for contributing code and improvements, and to everyone who reported issues and shared suggestions — you help make uniTerm better ❤️
 
-<a href="https://github.com/ys-ll/uniterm/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=ys-ll/uniterm&max=300&columns=15" />
-</a>
+- [@yuwei5380](https://github.com/yuwei5380)
+- [@surenwuyuwuqiu](https://github.com/surenwuyuwuqiu)
+- [@wangxufeng](https://github.com/wangxufeng)
+- [@coderstory](https://github.com/coderstory)
+- [@jiayunora](https://github.com/jiayunora)
+- [@iCarrear](https://github.com/iCarrear)
+- [@boltomli](https://github.com/boltomli)
+- [@kxn](https://github.com/kxn)
+- [@windtear](https://github.com/windtear)
+- [@Sunshow](https://github.com/Sunshow)
+- [@feuvan](https://github.com/feuvan)
+- [@zhangsir1211](https://github.com/zhangsir1211)
+- [@sonnartliao](https://github.com/sonnartliao)
+- [@Teejer](https://github.com/Teejer)
+- [@IBRAHIMELAMRABET](https://github.com/IBRAHIMELAMRABET)
+- [@chris-edstrom](https://github.com/chris-edstrom)
+- [@andreafunicelli](https://github.com/andreafunicelli)
+- [@dungvv](https://github.com/dungvv)
+- [@zhongqian97](https://github.com/zhongqian97)
+- [@laigcss](https://github.com/laigcss)
+- [@lutzr400](https://github.com/lutzr400)
 
 ## License
 
